@@ -1,65 +1,48 @@
-import Image from "next/image";
-
-export default function Home() {
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+    <div dangerouslySetInnerHTML={{ __html: `
+<nav class="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center gap-3 sticky top-0 z-50">
+  <img src="/img/logo.png" class="h-8 w-8 rounded" alt="Habi">
+  <span class="font-semibold text-lg tracking-tight">Hub Comercial</span>
+</nav>
+<main class="max-w-5xl mx-auto px-4 py-10">
+  <h1 class="text-3xl font-bold mb-2">Hub Comercial Habi</h1>
+  <p class="text-gray-400 mb-8">Reportes comerciales con datos en vivo de BigQuery.</p>
+  <div class="grid sm:grid-cols-2 gap-6">
+    <a href="/funnel/mm" class="block p-6 rounded-2xl bg-gray-900 border border-gray-800 hover:border-purple-500/50 transition group">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-2xl">📊</span>
+        <h2 class="text-lg font-semibold group-hover:text-purple-400 transition">Funnel Comercial — MM</h2>
+        <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">Activo</span>
+      </div>
+      <p class="text-sm text-gray-400">Volumen por etapa del funnel ibuyer (asignación → cierre). Filtros por equipo, categoría, fuente y área metropolitana.</p>
+    </a>
+    <a href="/funnel/inmo" class="block p-6 rounded-2xl bg-gray-900 border border-gray-800 hover:border-teal-500/50 transition group">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-2xl">🏘️</span>
+        <h2 class="text-lg font-semibold group-hover:text-teal-400 transition">Funnel Comercial — Inmobiliaria</h2>
+        <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300">Activo</span>
+      </div>
+      <p class="text-sm text-gray-400">Volumen por etapa del pipeline inmobiliaria (asignado → captado). Filtros por equipo, área y prioridad.</p>
+    </a>
+    <a href="/funnel/combinado" class="block p-6 rounded-2xl bg-gray-900 border border-gray-800 hover:border-indigo-500/50 transition group">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-2xl">🔀</span>
+        <h2 class="text-lg font-semibold group-hover:text-indigo-400 transition">Funnel Combinado — MM + Inmo</h2>
+        <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">Activo</span>
+      </div>
+      <p class="text-sm text-gray-400">CVR cruzando ambos productos. Editás numerador y denominador (presets combinados o etapas individuales).</p>
+    </a>
+    <a href="/conversion/seller" class="block p-6 rounded-2xl bg-gray-900 border border-gray-800 hover:border-pink-500/50 transition group">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-2xl">📈</span>
+        <h2 class="text-lg font-semibold group-hover:text-pink-400 transition">Conversión por Seller</h2>
+        <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300">Activo</span>
+      </div>
+      <p class="text-sm text-gray-400">CVR Asignado → Cierre (MM) y Asignado → Captado (Inmo) por comercial individual, con benchmarks vs meta / equipo / global.</p>
+    </a>
+  </div>
+</main>
+    ` }} />
+  )
 }

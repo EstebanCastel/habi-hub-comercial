@@ -1,0 +1,15 @@
+<!-- KPI cards partial - rendered server-side via HTMX -->
+<!-- The server endpoint /funnel/mm/kpis returns this HTML with data populated -->
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 md:p-4 hover:shadow-md dark:hover:shadow-brand-900/20 transition">
+      <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400" data-field="label"></div>
+      <div class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 tabular-nums" data-field="actual"></div>
+      <div class="flex items-center justify-between text-[10px] md:text-[11px] mt-2 gap-1">
+        <span class="text-slate-400 dark:text-slate-500 truncate" data-field="anterior"></span>
+        <span class="px-1.5 py-0.5 rounded font-semibold" data-field="delta"></span>
+      </div>
+    </div>
+</div>
+<div class="text-[10px] text-slate-400 dark:text-slate-500 mt-2" data-field="mtd-label">
+  MTD comparison info
+</div>
