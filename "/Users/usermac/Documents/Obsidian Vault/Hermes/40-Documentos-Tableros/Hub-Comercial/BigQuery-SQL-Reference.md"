@@ -1,0 +1,250 @@
+---
+tags: [hub-comercial, habi, bigquery, sql, reference]
+created: 2026-06-09
+updated: 2026-06-09
+---
+
+# Hub Comercial — BigQuery SQL Reference
+
+Fuente de verdad para todas las queries del tablero comercial Habi Colombia.
+
+## 📂 Estructura del Proyecto (Next.js)
+
+```
+habi-hub-comercial/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── funnel/mm/route.ts           # Funnel MM (11 endpoints)
+│   │   │   ├── funnel/inmo/route.ts         # Funnel Inmo (10 endpoints)
+│   │   │   ├── funnel/combinado/route.ts    # Funnel Combinado (3 endpoints)
+│   │   │   ├── conversion/seller/route.ts   # Conversión Seller (2 endpoints)
+│   │   │   └── funnel/mm/precios-subsidios/route.ts
+│   │   ├── funnel/mm/page.tsx
+│   │   ├── funnel/inmo/page.tsx
+│   │   ├── funnel/combinado/page.tsx
+│   │   └── conversion/seller/page.tsx
+│   └── lib/
+│       ├── bq.ts              # BigQuery client + cache (2hr TTL)
+│       ├── accounts.ts        # Exclusion lists (bots/buffers)
+│       └── data.ts            # CSV/JSON loaders
+├── public/
+│   ├── js/funnel_mm.js        # Alpine component (1211 líneas)
+│   ├── js/funnel_inmo.js      # Alpine component (970 líneas)
+│   ├── js/conversion_seller.js
+│   └── js/funnel_combinado.js
+├── src/templates/             # HTML templates (converted from Jinja2)
+├── data/                      # Static CSVs/JSON (ciudades, comerciales, metas, ciclos)
+└── src/app/layout.tsx         # Global layout + Navbar + Tailwind config
+```
+
+---
+
+## 🔑 Credenciales BigQuery
+
+- **Service Account**: `ctl-reader-service@try12-455405.iam.gserviceaccount.com`
+- **Project billing**: `try12-455405` (jobs corren aquí)
+- **Datos leen de**: `papyrus-data` + `sellers-main-prod` (cross-project)
+- **Auth**: OAuth2 `authorized_user` (ADC) — no service account JSON
+
+```bash
+# Variables Vercel:
+GOOGLE_CREDENTIALS={"typ...
+```
+
+---
+
+## 📊 Endpoints API (action dispatch)
+
+### Funnel MM — `/api/funnel/mm?action=...`
+
+| Action | Descripción | Params |
+|--------|-------------|--------|
+| `filters` | Equipos, fuentes, áreas, cats, recurrencias, prioridades | `fecha_desde`, `fecha_hasta`, `granularidad` |
+| `etapas` | Lista de etapas + fuentes lead | `fecha_desde`, `fecha_hasta` |
+| `volumen` | Series temporales por etapa | `equipo[]`, `cat_com[]`, `cat[]`, `fuente[]`, `area[]`, `recurrencia[]`, `prioridad_mm[]`, `granularidad` |
+| `kpis` | KPIs MTD con comparación mes anterior | `fecha_desde`, `fecha_hasta`, `granularidad` |
+| `share-cat` | Distribución A/B/C + Sin cat | `fecha_desde`, `fecha_hasta`, `granularidad`, filtros locales |
+| `conv-time` | CVR en el tiempo (num/den) | `num[]`, `den[]`, `granularidad`, filtros locales |
+| `negocios` | Tabla paginada por NID | `etapa`, `page`, `page_size`, `search`, filtros |
+| `cosechas` | Cohortes semanales | `conteo` (cohorte/funnel), `granularidad`, filtros |
+| `metas-config` | Ciclos + metas modelo | - |
+| `metas-real` | Valores reales por semana/bucket | `ciclo`, `semana` |
+| `cache-clear` | POST - limpia cache BQ | - |
+
+### Funnel Inmo — `/api/funnel/inmo?action=...`
+
+| Action | Descripción |
+|--------|-------------|
+| `filters` | Equipos, áreas, cats_com, prioridades_inmo |
+| `etapas` | Asignados → Captado |
+| `volumen` | Series + CVR global |
+| `kpis` | MTD con MoM comparison |
+| `share-cat` | By prioridad_inmo |
+| `conv-time` | CVR num/den |
+| `negocios` | Cohort table |
+| `metas-config/reale/kpi-tendencias` | Metas Inmo (ciclo 4, modelo may-2026) |
+
+### Funnel Combinado — `/api/funnel/combinado?action=...`
+
+- `filters` — Unión MM + Inmo equipos/áreas
+- `etapas` — Keys: `mm:*`, `inmo:*`, `combo:*`
+- `conv-time` — Expande combo keys (ej `combo:transacciones` → `mm:cierre` + `inmo:captado`)
+
+### Conversión Seller — `/api/conversion/seller?action=...`
+
+- `cycles` — Períodos ciclo (asig/cierre dates)
+- `data` — `{mm, inmo}` con filas enriquecidas + meta_cvr, global_cvr, equipo_cvr
+
+### Precios Subsidios — `/api/funnel/mm/precios-subsidios?action=...`
+
+- `filters` — Areas, equipos, cats (range fechas)
+- `data` — KPIs 2026+ + series (20+ métricas: descuento, subsidio, ticket, coverage)
+
+---
+
+## 🗄️ Tables BigQuery Clave
+
+| Tabla | Proyecto | Uso |
+|-------|----------|-----|
+| `funnel_diarios_col` | `papyrus-data.habi_wh_bi` | Funnel MM histórico (1 fila/nid/etapa) |
+| `tabla_inmuebles_general` | `papyrus-data.habi_wh_bi` | Lead/Calificado (upstream) |
+| `deals` | `sellers-main-prod.hubspot` | Deal data (MM + Inmo) |
+| `historical` | `sellers-main-prod.hubspot` | Owner changes, dealstage changes |
+| `deal_pipelines_stages` | `sellers-main-prod.hubspot` | Stage ID → name mapping |
+| `tablero_asignacion_inmo_col` | `sellers-main-prod.bi_co` | Asignación Inmo oficial (1 fila/nid) |
+| `seguimiento_inmobiliaria_col` | `sellers-main-prod.bi_co` | Seguimiento Inmo por etapa |
+| `seguimiento_asignacion_ibuyer_co` | `sellers-main-prod.bi_co` | Asignación MM oficial (primer asignación comercial) |
+| `metas_comerciales_co` | `sellers-main-prod.bi_co` | **Drive-linked ⚠️** → exportar CSV |
+| `input_exclusion_nids_asignacion_mm_col` | `sellers-main-prod.bi_co` | **Drive-linked ⚠️** → exportar CSV |
+
+---
+
+## 🚫 Accounts Exclusion (src/lib/accounts.ts)
+
+```typescript
+// Bots/Queue MM
+MM_BOT_EMAILS = ['juanquinones@habi.co', 'iagabi@habi.co']
+
+// Bots/Queue Inmo
+INMO_BOT_EMAILS = ['cristianmartin@habi.co', 'jhoanbenavides@habi.co']
+
+// Buffers (leads parqueados)
+BUFFER_EMAILS = [
+  'susanaescobar@habi.co',
+  'danieljaramillo@habi.co', 
+  'juancampos@habi.co'
+]
+
+// Dónde aplicar:
+MM_EXCLUIR_EMAILS = MM_BOT_EMAILS + BUFFER_EMAILS  // Solo Conversión Seller MM
+INMO_EXCLUIR_EMAILS = INMO_BOT_EMAILS + BUFFER_EMAILS  // Solo Conversión Seller Inmo
+// Funnels (MM, Inmo, Combinado): SOLO BUFFER_EMAILS
+```
+
+---
+
+## 🎯 Etapas MM (funnel_diarios_col.valor)
+
+| Valor BQ | Display | Notas |
+|----------|---------|-------|
+| `Primer_asigancion` | Asignación | Typo BQ |
+| `Cita agendada` | Cita | |
+| `Visita efectuada` | Visita | |
+| `pre-comité validado` | Pre-comité | |
+| `Descartado por comité` | Descartado | |
+| `Aprobado` \| `inmueble aprobado` | Aprobado | Metas solo `Aprobado` |
+| `Aceptó Oferta - Pendiente firma` | Aceptó | |
+| `Cierre - Comprado` | Cierre | |
+
+**Excluidas**: `llamadas_comercial`, `Referido para inmobiliaria`, `No gestionado`, `Captado para inmobiliaria`
+
+---
+
+## 🔄 Recurrencia — flag_recurrecia_gestion
+
+| Valor | Significado | Encoding BQ |
+|-------|-------------|-------------|
+| `Primer gestión` | Lead fresco | NFC normal |
+| `Regestión` | Lead reciclado | **NFD** (`o`+U+0301) ⚠️ |
+
+> **Query fix**: `NORMALIZE(flag_recurrecia_gestion, NFC) = 'Regestión'` o `STARTS_WITH(..., 'Regest')`
+
+---
+
+## 🏷️ Etapas Inmo (pipeline 'Nuevo - Inmobiliaria CO')
+
+| Stage ID | Etapa | Fuente |
+|----------|-------|--------|
+| `1182117546` | Perfilado | historical |
+| `1182117547` | Enviado a comité | historical |
+| `1182117549` | Aprobado comité | historical |
+| `1182117550` | Ofertado | historical |
+| `1182117553` | Oferta aceptada | historical |
+| `1182117633` | Captado | **NO usar aquí** |
+
+> **Captado real**: `seguimiento_inmobiliaria_col` WHERE `etapa = 'Captaciones'` (cuadra con Looker, excluye incidente 7-abr)
+
+---
+
+## 📈 Definición Lead / Calificado / Asignados
+
+| Etapa | Tabla / Fecha | Filtros |
+|-------|---------------|---------|
+| **Lead** | `tabla_inmuebles_general.fecha_creacion` | `nid IS NOT NULL`, `fuente_id IN (35,20,47,39,3,7)` |
+| **Calificado** | `tabla_inmuebles_general.fecha_a_pricing` | Lead + `check_a_pricing = 1` |
+| **Asignados** | `historical` owner change (1ra asignación) | `check_a_pricing=1`, `calificacion NOT IN ('n','nh')`, estado gestionable |
+
+> Lead ≈ 3x Calificado (muchos no llegan a pricing). Calificado→Asignado CVR ~76-80%.
+
+---
+
+## 📋 CSVs Auxiliares (data/)
+
+| Archivo | Propósito |
+|---------|-----------|
+| `comerciales.csv` | Catálogo: email, equipo, cat, líder, especialidad |
+| `metas_comerciales_co.csv` | Export BI Sheet: activos por mes + rol |
+| `NID's para excluir...csv` | 606 NIDs errores asignación (23-abr + masivas) |
+| `mm 2030 Sellers...csv` | Metas semanales MM por zona/cat |
+| `comercial_cycles.json` | Ciclos 2026 con fechas/semanas |
+
+---
+
+## 🎨 Frontend Stack (exacto al original)
+
+- **Tailwind v4** via PostCSS (`@tailwindcss/postcss`) + config inline en layout
+- **HTMX 2.0.4** — `hx-get`, `hx-vals="js:{...}"`, `hx-include` removed
+- **Alpine.js 3.14.9** — `x-data`, `x-show`, `x-for`, stores
+- **Chart.js 4.4.4** + `chartjs-plugin-annotation` 3.0.1
+- **Inter font** from rsms.me
+- **darkMode: 'media'** (auto OS preference como original)
+
+---
+
+## 🚀 Deploy Vercel
+
+```bash
+# Repo: https://github.com/EstebanCastel/habi-hub-comercial
+# URL: https://habi-hub-comercial-ruby.vercel.app/
+# Auto-deploy on push to main
+```
+
+---
+
+## 📝 Para Ejecutar Local
+
+```bash
+cd habi-hub-comercial
+npm run dev  # Puerto 3000
+# Requiere: GOOGLE_CREDENTIALS en .env.local (ADC user creds)
+```
+
+---
+
+## 🔗 Enlaces Relacionados
+
+- [[Hub Comercial - Arquitectura]]
+- [[Hub Comercial - Business Logic]]
+- [[Hub Comercial - KPIs y Metas]]
+- [[Hub Comercial - Troubleshooting]]

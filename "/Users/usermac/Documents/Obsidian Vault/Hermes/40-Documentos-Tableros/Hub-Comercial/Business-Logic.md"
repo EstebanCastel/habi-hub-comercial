@@ -1,0 +1,189 @@
+---
+tags: [hub-comercial, habi, business-logic, kpi, metas, funnel]
+created: 2026-06-09
+updated: 2026-06-09
+---
+
+# Hub Comercial — Business Logic & KPIs
+
+## 🎯 Funnel MM — Volumen por Etapa
+
+**Definición**: Distinct NIDs por período (mes/semana/día) que alcanzaron cada etapa.
+
+**Etapas ordenadas**: Asignación → Cita → Visita → Pre-comité → Descartado → Aprobado/Inmueble aprob. → Rechazó → Aceptó → Cierre
+
+**Filtros globales**: Equipo, Cat. Comercial, Categoría, Fuente, Área, Recurrencia (PG/RG), Prioridad MM
+
+**Granularidad**: Mes / Semana / Día / Mes com. / Sem. com.
+
+**Querys**: CTE únificada eventos → pivot por etapa → `COUNT(DISTINCT nid)`
+
+---
+
+## 📊 KPIs MTD (Month-to-Date)
+
+**6 tarjetas**: Asignaciones, Citas, Visitas, Pre-comité, Aprobados, Cierres
+
+**Cada tarjeta**:
+- **Actual**: `COUNT(DISTINCT nid)` mes actual hasta día corte
+- **Anterior**: Mismo rango días mes anterior
+- **Delta %**: `(actual - anterior) / anterior * 100`
+- **Formato**: "vs may 2026: 1.468" + "%" coloreado (verde/rojo)
+
+**Label pie**: "MTD jun 2026 días 1–9 vs may 2026 mismos días"
+
+**API**: `/api/funnel/mm?action=kpis` → JSON con `{kpis:[{label,actual,anterior,delta}], label_actual, label_anterior, dia_corte}`
+
+---
+
+## 🍩 Share de Categorización (A/B/C / Sin cat)
+
+**Contexto**: Distribución de NIDs en **Primer Asignación** por categoría comercial
+
+**Filtros LOCALES** (sobrescriben globales SÓLO esta card):
+- Fuente, Equipo, Área, Prioridad MM, Prioridad Inmo
+
+**Checkbox**: "Excluir Sin categoría"
+
+**2 visualizaciones**:
+1. **Donut** — Share % por cat
+2. **Barras apiladas** — Absolutos por período
+
+**API**: `/api/funnel/mm?action=share-cat`
+
+---
+
+## 📈 Tasa de Conversión en el Tiempo (Conv-Time)
+
+**Fórmula**: `CVR = suma(numerador) ÷ suma(denominador)` por período
+
+**Numerador/Denominador editables**:
+- **Etapas funnel MM**: `Primer_asigancion`, `Cita agendada`, `Visita efectuada`, `pre-comité validado`, `Aprobado`, `Cierre - Comprado`
+- **Etapas Lead (upstream)**: `Lead` (nid), `Lead (filas)`, `Calificado`
+- **Combo keys**: Solo MM usa keys simples
+
+**Filtros LOCALES**: Fuente, Equipo, Prioridad, Área
+> ⚠️ Para Lead: solo Fuente + Área (Equipo/Prioridad/Cat son post-asignación)
+
+**Granularidad parametrizada** — `_group_expr(granularidad, field=...)` para que Lead agrupe por `fecha_creacion` y funnel por `f.fecha`
+
+**API**: `/api/funnel/mm?action=conv-time`
+
+---
+
+## 🌾 Cosechas (Cohortes Semanales)
+
+**Modo `conteo`**: `cohorte` (default) vs `funnel`
+- **cohorte**: NID → 1 cohorte por su 1er evento (CVR limpio)
+- **funnel**: NID puede caer en múltiples cohortes (total = /volumen)
+
+**Visual**: Tabla calor semana → etapa
+
+**API**: `/api/funnel/mm?action=cosechas&conteo=cohorte|funnel`
+
+---
+
+## 🎯 Funnel Inmo — Pipeline Inmobiliaria
+
+**Etapas**: Asignados → Perfilados → Aprobados → Ofertados → Aceptadas → Captados
+
+**Fuente Captado**: `seguimiento_inmobiliaria_col` WHERE `etapa = 'Captaciones'` (cuadra Looker, excluye incidente 7-abr)
+
+**Metas**: Modelo Ciclo 4 (mayo 2026) — Leads totales 6500, distribución abril, CVR por cat
+
+**Toggle**: "Incidente 7 abr" — excluye 8.290 NIDs marcados erróneamente
+
+---
+
+## 🔀 Funnel Combinado MM + Inmo
+
+**Keys unificadas**:
+- `mm:<etapa>` — MM individual
+- `inmo:<etapa>` — Inmo individual
+- `combo:<preset>` — `transacciones` (cierre+captado), `asignados` (mm+asignados+inmo-asignados), etc.
+
+**Backend expande combo keys** a lista real antes de SQL
+
+**Mismo CVR formula**: `sum(num) / sum(den)` por período
+
+---
+
+## 📈 Conversión por Seller
+
+**MM (Asignado → Cierre)**:
+- **Denom**: `seguimiento_asignacion_ibuyer_co` WHERE `tipo_asignacion_comercial = 'Primer Asignación comercial'` (salta bot/queue!)
+- **Num**: `funnel_diarios_col` `Cierre - Comprado` atribuido a `hubspot_owner_id_historico`
+- **Filtros**: `fuente NOT IN (Broker, comercial, Ventana)`, `prioridad_mm IS NOT NULL`, blacklist lote_ids/zonas
+
+**Inmo (Asignado → Captado)**:
+- **Denom**: Owner change + `prioridad_inmo IS NOT NULL` + `comerciales.csv` activos (Looker logic)
+- **Num**: `historical` dealstage `1182117633` (captado stage ID)
+
+**Benchmarks por fila**: Meta CVR, Global CVR, Equipo CVR
+
+**UI**: Tabla + share cat (Lead vs Seller) + CVR por mes/cat (líneas)
+
+---
+
+## 💰 Precios + Subsidios
+
+**Experimento**: `co-rangos-20260122` (inicio 26-ene, subida descuento 10-mar)
+
+**KPIs (2026+)**:
+- Descuento mediano (dv/dc) × precio base/min/inter/max
+- Tasa subsidio / monto / bolsas 1/2
+- Ticket mediano (base/inter/final)
+- Coverage experimento (≥5 threshold)
+
+**Anotaciones Charts**: 26-ene (inicio), 10-mar (subida)
+
+---
+
+## 🚫 Exclusiones (src/lib/accounts.ts)
+
+| Lista | Emails | Dónde aplicar |
+|-------|--------|---------------|
+| `MM_BOT_EMAILS` | juanquinones, iagabi | Conv Seller MM |
+| `INMO_BOT_EMAILS` | cristianmartin, jhoanbenavides | Conv Seller Inmo |
+| `BUFFER_EMAILS` | susanaescobar, danieljaramillo, juancampos | **Todos** (funnels + conv) |
+
+---
+
+## 📅 Ciclos Comerciales
+
+`reports/comercial_cycles.json` → `{ciclo, asig_desde, asig_hasta, cierre_desde, cierre_hasta}`
+
+Usado en: Conv Seller (períodos), Metas (semanas por ciclo)
+
+---
+
+## 📋 CSVs Auxiliares
+
+| Archivo | Carga | Uso |
+|---------|-------|-----|
+| `comerciales.csv` | `loadComerciales()` | Catálogo equipos/cats, filtros, atribución |
+| `metas_comerciales_co.csv` | UNNEST en SQL | Inmo activos por mes, meta CVR |
+| `NID's excluir...csv` | UNNEST | Excluir 606 NIDs error |
+| `mm 2030...csv` | `load_metas()` parser | Metas semanales MM zona/cat |
+| `comercial_cycles.json` | `loadCycles()` | Períodos ciclos 2026 |
+
+---
+
+## Quick SQL Patterns
+
+```sql
+-- Skip bots/buffers
+WHERE {{ sql_not_in('hubspot_owner_id_historico', MM_EXCLUIR_EMAILS) }}
+
+-- Recurrencia NFD fix
+WHERE STARTS_WITH(flag_recurrecia_gestion, 'Regest')
+
+-- Aprobado ONLY (not 'inmueble aprobado')
+WHERE valor = 'Aprobado'
+
+-- Primer asignación comercial (MM)
+WHERE tipo_asignacion_comercial = 'Primer Asignación comercial'
+
+-- Captado oficial (Inmo)
+FROM seguimiento_inmobiliaria_col WHERE etapa = 'Captaciones'
+```

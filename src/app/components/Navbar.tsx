@@ -15,12 +15,12 @@ export default function Navbar() {
           <a href="/funnel/mm" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel MM</a>
           <a href="/funnel/inmo" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel Inmo</a>
           <a href="/funnel/combinado" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Combinado</a>
-          <a href="/conversion/seller" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Conversi\\u00f3n Seller</a>
+          <a href="/conversion/seller" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Conversión Seller</a>
         </nav>
 
         <!-- Mobile nav toggle -->
         <div x-data="{open:false}" class="md:hidden ml-auto">
-          <button @click="open=!open" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Men\\u00fa">
+          <button @click="open=!open" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Menú">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
@@ -29,16 +29,16 @@ export default function Navbar() {
             <a href="/funnel/mm" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel MM</a>
             <a href="/funnel/inmo" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel Inmo</a>
             <a href="/funnel/combinado" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Combinado</a>
-            <a href="/conversion/seller" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Conversi\\u00f3n Seller</a>
+            <a href="/conversion/seller" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Conversión Seller</a>
           </div>
         </div>
 
         <div class="hidden md:flex items-center gap-3 ml-auto">
           <span id="page-loader" class="hidden text-xs text-slate-500 dark:text-slate-400 items-center gap-1">
             <span class="inline-block w-3 h-3 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
-            Cargando\u2026
+            Cargando…
           </span>
-          <span class="text-xs text-slate-400 dark:text-slate-500">Live \u00b7 BQ</span>
+          <span class="text-xs text-slate-400 dark:text-slate-500">Live · BQ</span>
         </div>
       </div>
     </header>

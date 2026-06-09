@@ -1,0 +1,139 @@
+---
+tags: [hub-comercial, habi, architecture, nextjs, bigquery]
+created: 2026-06-09
+---
+
+# Hub Comercial — Arquitectura Next.js
+
+## Stack Completo
+
+| Capa | Tecnología | Versión/Config |
+|------|------------|----------------|
+| Framework | Next.js | 16.2.7 (App Router, Turbopack) |
+| CSS | Tailwind | v4 via `@tailwindcss/postcss` |
+| Frontend JS | Alpine.js | 3.14.9 (CDN) |
+| Frontend JS | HTMX | 2.0.4 (CDN) |
+| Charts | Chart.js | 4.4.4 + annotation plugin 3.0.1 |
+| Font | Inter | rsms.me CDN |
+| Backend | Next.js API Routes | TypeScript |
+| DB Client | @google-cloud/bigquery | 7.x |
+| Cache | In-memory Map | 2hr TTL, 500 entries |
+| Deploy | Vercel | Auto on main push |
+
+---
+
+## Estructura de Archivos Clave
+
+```
+src/
+├── app/
+│   ├── layout.tsx                    # Global: navbar, fonts, HTMX, Chart.js, Tailwind config
+│   ├── page.tsx                      # Home cards
+│   ├── globals.css                   # Tailwind v4 imports + dark mode variant
+│   ├── components/
+│   │   └── Navbar.tsx                # Global nav tabs (Alpine via dangerouslySetInnerHTML)
+│   ├── api/                          # 5 API routes (action dispatch)
+│   │   ├── funnel/mm/route.ts
+│   │   ├── funnel/inmo/route.ts
+│   │   ├── funnel/combinado/route.ts
+│   │   ├── conversion/seller/route.ts
+│   │   └── funnel/mm/precios-subsidios/route.ts
+│   └── funnel/mm|inmo|combinado/conversion/seller/page.tsx
+├── lib/
+│   ├── bq.ts                         # BigQuery singleton + cache
+│   ├── accounts.ts                   # Email exclusion lists
+│   └── data.ts                       # CSV/JSON loaders
+├── templates/                        # 5 HTML templates (converted from Jinja2)
+│   ├── funnel-mm.html
+│   ├── funnel-inmo.html
+│   ├── funnel-combinado.html
+│   ├── conversion-seller.html
+│   └── funnel-mm-kpis.html (legacy)
+└── data/                             # Static CSVs/JSON
+```
+
+---
+
+## Flujo de Datos
+
+```
+Usuario → Dashboard (Alpine + HTMX)
+  → Filtros → buildQS() → /api/funnel/mm?action=volumen&...
+  → Next.js API Route (route.ts)
+    → bq.query(sql) → BigQuery (Cross-project)
+    → Cache hit/miss (2hr TTL)
+    → JSON response
+  → Alpine renders: Chart.js, KPIs, Tables
+```
+
+---
+
+## Tailwind Config (inline en layout.tsx)
+
+```js
+tailwind.config = {
+  darkMode: 'media',  // Sigue OS preference
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+      colors: {
+        brand: { 50:'#f5f3ff', 100:'#ede9fe', 200:'#ddd6fe', 300:'#c4b5fd',
+                 400:'#a78bfa', 500:'#8b5cf6', 600:'#7c3aed', 700:'#6d28d9',
+                 800:'#5b21b6', 900:'#4c1d95' }
+      }
+    }
+  }
+}
+```
+
+---
+
+## Scripts de Página (en dangerouslySetInnerHTML)
+
+Cada `page.tsx` lee `src/templates/*.html` y le concatena:
+
+```html
+<script src="/js/funnel_mm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
+```
+
+Esto asegura que Alpine.js cargue **después** del componente `funnelMM()`.
+
+---
+
+## Variables de Entorno (Vercel)
+
+| Variable | Valor |
+|----------|-------|
+| `GOOGLE_CREDENTIALS` | OAuth2 `authorized_user` JSON (ADC) |
+| `BQ_PROJECT` | `try12-455405` (billing project) |
+
+---
+
+## BigQuery Client (src/lib/bq.ts)
+
+```typescript
+// Singleton pattern
+// Soporta: service_account JSON, authorized_user (ADC), fallback gcloud ADC
+// Cache: Map<hash, {data, expiry}> — 2hr TTL, max 500
+```
+
+---
+
+## Autenticación BigQuery
+
+- **Billing project**: `try12-455405` (jobs corren aquí)
+- **Datos**: `papyrus-data` + `sellers-main-prod` (cross-project, fully qualified)
+- **Creds**: OAuth2 user (`authorized_user`) — requiere roles:
+  - `try12-455405`: `bigquery.jobUser`
+  - `papyrus-data`: `bigquery.dataViewer`
+  - `sellers-main-prod`: `bigquery.dataViewer`
+
+---
+
+## Convenciones
+
+- **darkMode: 'media'** — respeta `prefers-color-scheme` del OS (igual que original)
+- **Contenedor**: `max-w-[1700px] mx-auto px-4 md:px-6 py-4 md:py-6`
+- **Brand color**: Indigo/violet (`#7c3aed`)
+- **Favicon**: `/img/logo.png` via `icons` config + `site.webmanifest`
