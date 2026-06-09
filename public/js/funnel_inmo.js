@@ -39,7 +39,13 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
   const root = document.querySelector("[x-data^='funnelInmo']");
   if (root && root._x_dataStack) {
     const data = root._x_dataStack[0];
-    if (data && data.refreshVolumen) data.refreshVolumen();
+    if (data) {
+      // Re-render all charts on theme change
+      if (data.refreshVolumen) data.refreshVolumen();
+      if (data.refreshShareCat) data.refreshShareCat();
+      if (data.refreshConvTime) data.refreshConvTime();
+      if (data.renderSparklines) data.renderSparklines();
+    }
   }
 });
 
