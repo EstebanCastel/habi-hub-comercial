@@ -21,6 +21,8 @@ const sourceDir = path.join(__dirname, '..', 'data');
 const sqlSourceDir = path.join(__dirname, '..', 'data', 'sql');
 const targetDir = path.join(__dirname, '..', '.next', 'standalone', 'data');
 const sqlTargetDir = path.join(__dirname, '..', '.next', 'standalone', 'data', 'sql');
+// Also copy to standalone root for direct access (e.g., metas_mm uses process.cwd())
+const rootTargetDir = path.join(__dirname, '..', '.next', 'standalone');
 
 // Create target directories
 [targetDir, sqlTargetDir].forEach(dir => {
@@ -29,7 +31,7 @@ const sqlTargetDir = path.join(__dirname, '..', '.next', 'standalone', 'data', '
   }
 });
 
-// Copy data files
+// Copy data files to data/ subdirectory
 dataFiles.forEach(file => {
   const src = path.join(sourceDir, file);
   const dest = path.join(targetDir, file);
@@ -38,6 +40,18 @@ dataFiles.forEach(file => {
     console.log(`Copied: ${file}`);
   } else {
     console.warn(`Source file not found: ${src}`);
+  }
+});
+
+// Also copy to root for direct access (metas_mm uses process.cwd())
+dataFiles.forEach(file => {
+  const src = path.join(sourceDir, file);
+  const dest = path.join(rootTargetDir, file);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, dest);
+    console.log(`Copied to root: ${file}`);
+  } else {
+    console.warn(`Source file not found for root: ${src}`);
   }
 });
 
