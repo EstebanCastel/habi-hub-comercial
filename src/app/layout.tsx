@@ -5,7 +5,12 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Hub Comercial \u2014 Habi",
   description: "Tablero comercial Habi: funnels MM, Inmo, combinado y conversi\u00f3n por seller.",
-  icons: { icon: "/img/logo.png" },
+  icons: {
+    icon: "/img/logo.png",
+    shortcut: "/img/logo.png",
+    apple: "/img/logo.png",
+  },
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
