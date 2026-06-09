@@ -243,7 +243,10 @@ function funnelInmo() {
         ]);
         this.metaReal = realRes;
         this.metaKpi = kpiRes.series || {};
-        this.$nextTick(() => { this.renderSparklines(); this.renderMetaTable(); });
+        this.$nextTick(() => {
+          try { this.renderSparklines(); } catch (e) { console.error('renderSparklines failed:', e); }
+          try { this.renderMetaTable(); } catch (e) { console.error('renderMetaTable failed:', e); }
+        });
       } finally {
         this.loading.metas = false;
       }
@@ -264,8 +267,8 @@ function funnelInmo() {
           data: {
             labels: s.labels,
             datasets: [
-              { label: "Meta", data: s.metas, backgroundColor: isDarkMode() ? "#334155" : "#e2e8f0", borderRadius: 1, barPercentage: 0.9, categoryPercentage: 0.9 },
-              { label: "Real", data: s.reales, backgroundColor: "#00897B", borderRadius: 1, barPercentage: 0.5, categoryPercentage: 0.9 },
+              { label: "Meta", data: s.metas.map(v => v ?? null), backgroundColor: isDarkMode() ? "#334155" : "#e2e8f0", borderRadius: 1, barPercentage: 0.9, categoryPercentage: 0.9 },
+              { label: "Real", data: s.reales.map(v => v ?? null), backgroundColor: "#00897B", borderRadius: 1, barPercentage: 0.5, categoryPercentage: 0.9 },
             ]
           },
           options: {
