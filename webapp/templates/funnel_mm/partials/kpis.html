@@ -1,0 +1,21 @@
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+  {% for k in kpis %}
+    <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 md:p-4 hover:shadow-md dark:hover:shadow-brand-900/20 transition">
+      <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ k.label }}</div>
+      <div class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 tabular-nums">{{ "{:,}".format(k.actual).replace(",", ".") }}</div>
+      <div class="flex items-center justify-between text-[10px] md:text-[11px] mt-2 gap-1">
+        <span class="text-slate-400 dark:text-slate-500 truncate">vs {{ label_anterior }}: {{ "{:,}".format(k.anterior).replace(",", ".") }}</span>
+        {% if k.delta is none %}
+          <span class="px-1.5 py-0.5 rounded font-semibold text-slate-500 bg-slate-50 dark:text-slate-400 dark:bg-slate-800">—</span>
+        {% elif k.delta >= 0 %}
+          <span class="px-1.5 py-0.5 rounded font-semibold text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-900/30">+{{ "%.1f"|format(k.delta) }}%</span>
+        {% else %}
+          <span class="px-1.5 py-0.5 rounded font-semibold text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-900/30">{{ "%.1f"|format(k.delta) }}%</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+<div class="text-[10px] text-slate-400 dark:text-slate-500 mt-2">
+  MTD: {{ label_actual }} días 1–{{ dia_corte }} vs {{ label_anterior }} mismos días
+</div>

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mb-6 md:mb-8">
+  <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Reportes comerciales Colombia</h1>
+  <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm md:text-base">Data live desde BigQuery — los filtros refrescan automáticamente</p>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for r in reports %}
+    {% set is_active = r.url != "#" %}
+    <a
+      href="{{ r.url }}"
+      class="group relative bg-white dark:bg-slate-900 rounded-2xl p-5 md:p-6 border border-slate-200 dark:border-slate-800 hover:border-brand-500 dark:hover:border-brand-400 hover:shadow-lg dark:hover:shadow-brand-900/30 transition shadow-sm
+             {% if not is_active %}opacity-60 pointer-events-none{% endif %}"
+    >
+      <div class="flex items-start gap-4 mb-3">
+        <div class="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800 grid place-items-center text-2xl">{{ r.icon }}</div>
+        <div class="flex-1 min-w-0">
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition">{{ r.title }}</h2>
+        </div>
+      </div>
+      <p class="text-sm text-slate-600 dark:text-slate-400 leading-relaxed mb-4">{{ r.desc }}</p>
+      <div class="flex items-center gap-2 text-xs">
+        {% if is_active %}
+          <span class="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-medium">{{ r.badge }}</span>
+        {% else %}
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium">{{ r.badge }}</span>
+        {% endif %}
+        <span class="text-slate-400 dark:text-slate-500">live · BQ</span>
+      </div>
+    </a>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}Conversión por Seller · {{ app_name }}{% endblock %}
+
+{% block content %}
+<div x-data="convSeller()" class="space-y-4">
+  <!-- Header -->
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Conversión por Seller</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-xs md:text-sm mt-1">
+        CVR throughput por comercial — <em>asignados en período de asignación</em> ÷ <em>cierres/captados en período de cierre</em>
+      </p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-slate-400 dark:text-slate-500" x-show="periodoLabel" x-text="periodoLabel"></span>
+      <button @click="forceRefresh()" :disabled="refreshing"
+        class="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" :class="refreshing && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="refreshing ? 'Actualizando…' : 'Actualizar datos'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Tabs producto -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['mm','MM'],['inmo','Inmobiliaria']]" :key="t[0]">
+        <button @click="producto=t[0]; rebuild()"
+          :class="producto===t[0]
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400'
+            : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Ciclo</label>
+        <select x-model.number="ciclo" @change="rebuild()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+          <template x-for="c in cicloOptions" :key="c.ciclo">
+            <option :value="c.ciclo" x-text="'Ciclo ' + c.ciclo + ' — asig ' + c.asig_start.substring(5) + '→' + c.asig_end.substring(5) + ', cierre ' + c.cierre_start.substring(5) + '→' + c.cierre_end.substring(5)"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+        <div x-data="multiSelectCS('equipo', () => equiposOptions, () => rebuild())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[200px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+              (Todos)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Categoría</label>
+        <div x-data="multiSelectCS('categoria', () => catOptions, () => rebuild())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[160px] py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+              (Todas)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Comercial</label>
+        <div x-data="multiSelectCS('comercial', () => sellerOptions, () => rebuild())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+              (Todos)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt" class="font-mono truncate"></span>
+              </label>
+            </template>
+            <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin comerciales</div>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Buscar seller</label>
+        <input type="text" x-model.debounce.300ms="search" @input="rebuild()"
+          placeholder="email contiene…"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mín. asignados</label>
+        <input type="number" min="0" x-model.number="minAsig" @input="rebuild()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="kpi-row">
+    <template x-for="k in kpis" :key="k.label">
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 md:p-4">
+        <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400" x-text="k.label"></div>
+        <div class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 tabular-nums" x-text="k.value"></div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1" x-text="k.sub"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Share por categoría -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">Share por categoría</h2>
+      <div class="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 text-xs">
+        <button @click="shareCatMode='lead'"
+          :class="shareCatMode==='lead' ? 'bg-brand-600 text-white' : 'text-slate-500 dark:text-slate-400'"
+          class="px-3 py-1 rounded-md transition">Categoría del lead</button>
+        <button @click="shareCatMode='seller'"
+          :class="shareCatMode==='seller' ? 'bg-brand-600 text-white' : 'text-slate-500 dark:text-slate-400'"
+          class="px-3 py-1 rounded-md transition">Categoría del seller</button>
+      </div>
+    </div>
+
+    <!-- Leyenda -->
+    <div class="flex flex-wrap gap-3 mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+      <template x-for="s in shareLegend" :key="s.cat">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-sm" :style="`background:${s.color}`"></span>
+          <span x-text="s.label"></span>
+        </span>
+      </template>
+    </div>
+
+    <template x-for="bar in [{key:'asig', label:'Asignados', total:shareData.asigTotal, segs:shareData.asig},{key:'cier', label: producto==='mm' ? 'Cierres' : 'Captados', total:shareData.cierTotal, segs:shareData.cier}]" :key="bar.key">
+      <div class="mb-3 last:mb-0">
+        <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+          <span x-text="bar.label"></span>
+          <span class="tabular-nums" x-text="bar.total.toLocaleString('es-CO')"></span>
+        </div>
+        <div class="flex h-7 w-full rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800">
+          <template x-for="seg in bar.segs" :key="seg.cat">
+            <div class="flex items-center justify-center text-[10px] font-medium text-white/95 whitespace-nowrap overflow-hidden"
+                 :style="`width:${seg.pct}%;background:${seg.color}`"
+                 :title="`${seg.label}: ${seg.count.toLocaleString('es-CO')} (${seg.pct.toFixed(1)}%)`"
+                 x-text="seg.pct >= 7 ? seg.label + ' ' + seg.pct.toFixed(0) + '%' : ''"></div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- CVR por mes comercial y categoría (líneas) -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-1 flex-wrap gap-2">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">CVR por mes comercial y categoría</h2>
+      <span class="text-xs text-slate-400 dark:text-slate-500">una línea por categoría · usa el toggle de arriba (lead/seller)</span>
+    </div>
+    <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">
+      CVR del ciclo = cierres del período de cierre ÷ asignados del período de asignación, por categoría. Respeta los filtros (equipo, categoría, búsqueda); ignora el filtro de ciclo.
+    </p>
+    <div class="relative h-[280px] md:h-[320px]">
+      <canvas id="chart-cvr-lines"></canvas>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">CVR por seller <span class="text-slate-400 dark:text-slate-500 font-normal" x-text="'(' + filteredCount + ' sellers)'"></span></h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+          <span x-show="producto==='mm'">MM: denominador = primera asignación al comercial real (seguimiento_asignacion_ibuyer_co). Excluye Broker/comercial/Ventana, referidos, blacklist y zonas que no compramos.</span>
+          <span x-show="producto==='inmo'">Inmo: atribución por dueño actual del deal.</span>
+        </p>
+      </div>
+      <button @click="exportCsv()" class="px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition">Exportar CSV</button>
+    </div>
+
+    <div class="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table class="min-w-full text-xs md:text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider">
+          <tr>
+            <template x-for="h in tableHeaders" :key="h.key">
+              <th @click="sortBy(h.key)"
+                  :class="h.right ? 'text-right' : 'text-left'"
+                  class="px-3 py-2.5 whitespace-nowrap cursor-pointer hover:text-brand-600 dark:hover:text-brand-400 select-none">
+                <span x-text="h.label"></span>
+                <span class="ml-1 text-brand-600 dark:text-brand-400" x-text="sortKey===h.key ? (sortDir==='asc' ? '↑' : '↓') : ''"></span>
+              </th>
+            </template>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+          <template x-for="r in filteredRows" :key="r.email">
+            <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <td class="px-3 py-2 font-mono text-[11px] md:text-xs" x-text="r.email"></td>
+              <td class="px-3 py-2 whitespace-nowrap" :class="!r.equipo && 'italic text-slate-400 dark:text-slate-500'" x-text="r.equipo || 'Sin equipo'"></td>
+              <td class="px-3 py-2 whitespace-nowrap" x-text="r.categoria || '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums" x-text="r.asignados.toLocaleString('es-CO')"></td>
+              <td class="px-3 py-2 text-right tabular-nums" x-text="r.num.toLocaleString('es-CO')"></td>
+              <td class="px-3 py-2 text-right">
+                <span class="inline-block px-2 py-0.5 rounded font-semibold tabular-nums"
+                      :class="cvrColor(r.cvr, r.cvr_meta)"
+                      x-text="fmtPct(r.cvr)"></span>
+              </td>
+              <td class="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400" x-text="fmtPct(r.cvr_meta)"></td>
+              <td class="px-3 py-2 text-right tabular-nums" :class="deltaColor(r.delta_meta)" x-text="fmtPp(r.delta_meta)"></td>
+              <td class="px-3 py-2 text-right tabular-nums" :class="deltaColor(r.delta_team)" x-text="fmtPp(r.delta_team)"></td>
+              <td class="px-3 py-2 text-right tabular-nums" :class="deltaColor(r.delta_global)" x-text="fmtPp(r.delta_global)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div x-show="filteredRows.length === 0" x-cloak class="text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin resultados</div>
+  </div>
+
+  <p class="text-center text-xs text-slate-400 dark:text-slate-500 pt-2 pb-4">
+    Datos refrescados en tiempo real desde BigQuery · caché 5 min
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/conversion_seller.js"></script>
+{% endblock %}

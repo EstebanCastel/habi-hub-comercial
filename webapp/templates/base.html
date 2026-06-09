@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-50 dark:bg-slate-950">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#7c3aed" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="apple-touch-icon" href="/static/img/logo.png">
+
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',  // sigue automáticamente el modo del OS
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+          colors: {
+            brand: { 50:'#f5f3ff',100:'#ede9fe',200:'#ddd6fe',300:'#c4b5fd',400:'#a78bfa',500:'#8b5cf6',600:'#7c3aed',700:'#6d28d9',800:'#5b21b6',900:'#4c1d95' }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://rsms.me/">
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+
+  <!-- HTMX 2.x -->
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+  <!-- Alpine.js 3.x (reactividad chica) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full font-sans text-slate-800 dark:text-slate-100 antialiased transition-colors">
+  <!-- Top bar -->
+  <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 backdrop-blur supports-[backdrop-filter]:bg-white/80 supports-[backdrop-filter]:dark:bg-slate-900/80">
+    <div class="max-w-[1700px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-4">
+      <a href="/" class="flex items-center gap-2 group shrink-0">
+        <img src="/static/img/logo.png" alt="Habi" class="w-9 h-9 object-contain shrink-0">
+        <span class="font-semibold tracking-tight text-slate-900 dark:text-slate-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition hidden sm:inline">Hub Comercial</span>
+      </a>
+
+      <!-- Desktop nav -->
+      <nav class="hidden md:flex items-center gap-1 ml-4 text-sm">
+        <a href="/funnel/mm"         class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel MM</a>
+        <a href="/funnel/inmo"       class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel Inmo</a>
+        <a href="/funnel/combinado"  class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Combinado</a>
+        <a href="/conversion/seller" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Conversión Seller</a>
+      </nav>
+
+      <!-- Mobile nav toggle -->
+      <div x-data="{open:false}" class="md:hidden ml-auto">
+        <button @click="open=!open" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Menú">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+        </button>
+        <div x-show="open" x-transition @click.outside="open=false" class="absolute right-3 top-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-2 min-w-[180px]" style="display:none">
+          <a href="/funnel/mm"         class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel MM</a>
+          <a href="/funnel/inmo"       class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel Inmo</a>
+          <a href="/funnel/combinado"  class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Combinado</a>
+          <a href="/conversion/seller" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Conversión Seller</a>
+        </div>
+      </div>
+
+      <div class="hidden md:flex items-center gap-3 ml-auto">
+        <span id="page-loader" class="hidden text-xs text-slate-500 dark:text-slate-400 items-center gap-1">
+          <span class="inline-block w-3 h-3 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+          Cargando…
+        </span>
+        <span class="text-xs text-slate-400 dark:text-slate-500">Live · BQ</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1700px] mx-auto px-4 md:px-6 py-4 md:py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- HTMX global loader hooks -->
+  <script>
+    document.body.addEventListener("htmx:beforeRequest", () => {
+      document.getElementById("page-loader")?.classList.remove("hidden");
+      document.getElementById("page-loader")?.classList.add("flex");
+    });
+    document.body.addEventListener("htmx:afterRequest", () => {
+      document.getElementById("page-loader")?.classList.add("hidden");
+      document.getElementById("page-loader")?.classList.remove("flex");
+    });
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

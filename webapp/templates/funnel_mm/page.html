@@ -1,0 +1,747 @@
+{% extends "base.html" %}
+{% block title %}Funnel MM · {{ app_name }}{% endblock %}
+
+{% block content %}
+{# Macro: un filtro multi-select #}
+{% macro ms(name, label, all_label="Todos") %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','cat_com':'cats_com','cat':'cats','fuente':'fuentes','area':'areas','recurrencia':'recurrencias'}[name] }}, () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        ({{ all_label }})
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+<div
+  x-data="funnelMM()"
+  data-fecha-desde="{{ fecha_desde }}"
+  data-fecha-hasta="{{ fecha_hasta }}"
+  class="space-y-4"
+>
+  <!-- Header -->
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Funnel Comercial · Market Maker</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-xs md:text-sm mt-1">Captaciones por etapa — data live desde BigQuery</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-slate-400 dark:text-slate-500">Rango: <span x-text="fechaDesde"></span> → <span x-text="fechaHasta"></span></span>
+      <button @click="forceRefresh()" :disabled="refreshing"
+        class="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" :class="refreshing && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="refreshing ? 'Actualizando…' : 'Actualizar datos'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Tabs Volumen / Metas -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['volumen','Volumen'],['metas','Metas'],['cosechas','Cosechas'],['precios','Precios + Subsidios']]" :key="t[0]">
+        <button @click="switchTab(t[0])"
+          :class="tab===t[0]
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400'
+            : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-8 gap-3">
+      {{ ms('equipo', 'Equipo') }}
+      {{ ms('cat_com', 'Cat. comercial', 'Todas') }}
+      {{ ms('cat', 'Categoría', 'Todas') }}
+      {{ ms('fuente', 'Fuente', 'Todas') }}
+      {{ ms('area', 'Área') }}
+
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
+        <input type="date" x-model="fechaDesde" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Hasta</label>
+        <input type="date" x-model="fechaHasta" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+
+      <div class="flex flex-col gap-1 min-w-0 col-span-2 sm:col-span-3 lg:col-span-3">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+        <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+          <template x-for="g in [['mes','Mes'],['semana','Sem'],['dia','Día'],['mes_com','Mes com.'],['sem_com','Sem. com.']]" :key="g[0]">
+            <button @click="granularidad=g[0]; refresh()"
+              :class="granularidad===g[0]
+                ? 'bg-brand-600 text-white'
+                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+              class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="g[1]"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button @click="resetFilters()" class="text-xs md:text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
+        Limpiar filtros
+      </button>
+    </div>
+  </div>
+
+  <!-- ─────────── TAB: VOLUMEN ─────────── -->
+  <div x-show="tab==='volumen'" class="space-y-4">
+
+  <!-- KPIs -->
+  <div
+    id="kpis-section"
+    hx-get="/funnel/mm/kpis"
+    hx-trigger="load, refresh-kpis from:body"
+    hx-vals="js:{...filterParams()}"
+    hx-include="none"
+    class="min-h-[120px]"
+  >
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {% for _ in range(6) %}
+        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Volumen chart -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">Volumen por etapa</h2>
+      <span class="text-xs text-slate-400 dark:text-slate-500">Distinct nids por período</span>
+    </div>
+    <div class="relative h-[300px] md:h-[420px]">
+      <canvas id="chart-volumen"></canvas>
+      <div x-show="loading.volumen" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <div class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+          Cargando…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share categorización (donut + bars stacked) -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-3">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Share de categorización</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Distribución por categoría (A/B/C) de los inmuebles en <em>Primer asignación</em></p>
+      </div>
+      <!-- Toggle excluir sin categoría -->
+      <label class="inline-flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-300 select-none">
+        <input type="checkbox" class="accent-brand-600" x-model="shareCatExcluirSin" @change="$nextTick(() => renderShareCat(lastShareCatData))">
+        <span>Excluir <em>Sin categoría</em></span>
+      </label>
+    </div>
+
+    {# Macro local: 1 multi-select compacto para esta sección #}
+    {% macro share_ms(key, label, options_attr) %}
+    <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+      <div x-data="multiSelect('{{ key }}', () => filtersOptions.{{ options_attr }} || [], () => refreshShareCat())" class="relative" @click.outside="open=false">
+        <button type="button" @click="open=!open"
+          class="w-full text-left px-3 py-1.5 text-xs rounded-lg flex items-center justify-between
+                 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+          <span x-text="btnLabel()" class="truncate"></span>
+          <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-64 py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+          <template x-for="opt in options()" :key="opt">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+              <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+              <span x-text="opt"></span>
+            </label>
+          </template>
+          <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+        </div>
+      </div>
+    </div>
+    {% endmacro %}
+
+    <!-- Filtros locales (sólo esta sección · sobrescriben los globales) -->
+    <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4">
+      <p class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500 mb-2">Filtros locales · sobrescriben los globales sólo en esta sección</p>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {{ share_ms('shareCatFuente',        'Fuente',        'fuentes') }}
+        {{ share_ms('shareCatEquipo',        'Equipo',        'equipos') }}
+        {{ share_ms('shareCatArea',          'Área',          'areas') }}
+        {{ share_ms('shareCatPrioridadMM',   'Prioridad MM',  'prioridades_mm') }}
+        {{ share_ms('shareCatPrioridadInmo', 'Prioridad Inmo','prioridades_inmo') }}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 md:gap-6 items-start">
+      <!-- Donut + leyenda -->
+      <div>
+        <div class="relative h-[160px]"><canvas id="chart-share-donut"></canvas></div>
+        <div id="share-legend" class="mt-3 space-y-1.5 text-sm"></div>
+      </div>
+      <!-- Stacked bars por período -->
+      <div class="relative h-[280px]">
+        <canvas id="chart-share-bars"></canvas>
+        <div x-show="loading.shareCat" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+          <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tasa de conversión en el tiempo -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Tasa de conversión en el tiempo</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+          CVR = suma(<em>Numerador</em>) ÷ suma(<em>Denominador</em>) · respeta granularidad y filtros
+        </p>
+      </div>
+      <span id="conv-totals" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:max-w-md gap-3 mb-3">
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Numerador</label>
+        <div x-data="multiSelect('convNum', () => etapasList, () => refreshConvTime())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Denominador</label>
+        <div x-data="multiSelect('convDen', () => etapasList, () => refreshConvTime())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Macro local: 1 multi-select compacto para la card de conversión #}
+    {% macro conv_ms(key, label, options_attr) %}
+    <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+      <div x-data="multiSelect('{{ key }}', () => filtersOptions.{{ options_attr }} || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
+        <button type="button" @click="open=!open"
+          class="w-full text-left px-3 py-1.5 text-xs rounded-lg flex items-center justify-between
+                 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+          <span x-text="btnLabel()" class="truncate"></span>
+          <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-64 py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+          <template x-for="opt in options()" :key="opt">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+              <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+              <span x-text="opt"></span>
+            </label>
+          </template>
+          <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+        </div>
+      </div>
+    </div>
+    {% endmacro %}
+
+    <!-- Filtros locales (sólo esta sección · sobrescriben los globales) -->
+    <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4">
+      <p class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500 mb-2">Filtros locales · sobrescriben los globales sólo en esta sección</p>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {{ conv_ms('convTimeFuente',      'Fuente',               'fuentes') }}
+        {{ conv_ms('convTimeEquipo',      'Equipo',               'equipos') }}
+        {{ conv_ms('convTimePrioridadMM', 'Prioridad de gestión', 'prioridades_mm') }}
+        {{ conv_ms('convTimeArea',        'Área',                 'areas') }}
+      </div>
+    </div>
+
+    <div class="relative h-[300px] md:h-[360px]">
+      <canvas id="chart-conv-time"></canvas>
+      <div x-show="loading.convTime" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Negocios listado -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Listado de negocios</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+          Datos crudos por nid · respeta filtros · rango de fechas filtra por la fecha de la <em>etapa seleccionada</em>
+        </p>
+      </div>
+      <span id="negocios-count" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-3 mb-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa alcanzada</label>
+        <select x-model="negociosEtapa" @change="negociosPage=1; refreshNegocios()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+          <option value="fecha_asignacion">Asignación</option>
+          <option value="fecha_cita">Cita</option>
+          <option value="fecha_visita">Visita</option>
+          <option value="fecha_precomite">Pre-comité</option>
+          <option value="fecha_aprobado">Aprobado</option>
+          <option value="fecha_acepto">Aceptó</option>
+          <option value="fecha_cierre">Cierre</option>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Buscar nid</label>
+        <input type="text" x-model.debounce.300ms="negociosSearch" @input="negociosPage=1; refreshNegocios()"
+          placeholder="nid contiene…"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex items-end">
+        <button @click="exportNegocios()" class="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition">
+          Exportar CSV
+        </button>
+      </div>
+    </div>
+
+    <div class="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table class="min-w-full text-xs md:text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider">
+          <tr>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">nid</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Equipo</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Cat. com.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Categoría</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Fuente</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Área</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Asig.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Cita</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Visita</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Pre-com.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Aprob.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Aceptó</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Cierre</th>
+          </tr>
+        </thead>
+        <tbody id="negocios-tbody" class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+          <tr><td colspan="13" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
+        </tbody>
+      </table>
+      <div x-show="loading.negocios" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-2 mt-3 text-sm">
+      <span id="negocios-pageinfo" class="text-slate-500 dark:text-slate-400">—</span>
+      <div class="flex gap-2">
+        <button @click="negociosPage > 1 && (negociosPage--, refreshNegocios())"
+          class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40"
+          :disabled="negociosPage === 1">← Anterior</button>
+        <button @click="negociosPage++; refreshNegocios();"
+          class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40"
+          :disabled="!negociosHasMore">Siguiente →</button>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /tab volumen -->
+
+  <!-- ─────────── TAB: METAS ─────────── -->
+  <div x-show="tab==='metas'" x-cloak class="space-y-4">
+
+    <!-- Sub-filtros del tab Metas -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Ciclo</label>
+          <select x-model.number="metaCiclo" @change="refreshMetas()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <template x-for="c in metaCycles" :key="c.ciclo">
+              <option :value="c.ciclo" x-text="'Ciclo ' + c.ciclo + ' — ' + c.mes + ' ' + c.year"></option>
+            </template>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desglose</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="d in [['total','Total'],['equipo','Equipo'],['categoria','Categoría']]" :key="d[0]">
+              <button @click="metaDesglose=d[0]; refreshMetas()"
+                :class="metaDesglose===d[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition" x-text="d[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Vista</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="v in [['semanal','Semanal'],['acumulado','Acumulado']]" :key="v[0]">
+              <button @click="metaVista=v[0]; renderMetaTable()"
+                :class="metaVista===v[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition" x-text="v[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Asume equipo por área</label>
+          <label class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer">
+            <input type="checkbox" x-model="metaAsumeArea" @change="refreshMetas()" class="accent-brand-600">
+            <span class="text-xs text-slate-500 dark:text-slate-400">Mapea leads sin comercial</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tendencias (6 cards con sparkline) -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 relative min-h-[120px]">
+      <template x-for="(etapa, i) in metaEtapas" :key="etapa">
+        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 hover:shadow-md dark:hover:shadow-brand-900/20 transition">
+          <div class="flex items-center justify-between gap-1">
+            <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400" x-text="etapa"></div>
+            <template x-if="metaKpi[etapa] && metaKpi[etapa].cumplimiento != null">
+              <span :class="metaKpi[etapa].cumplimiento >= 100 ? 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-900/30'
+                            : metaKpi[etapa].cumplimiento >= 80 ? 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-900/30'
+                            : 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-900/30'"
+                    class="text-[10px] px-1.5 py-0.5 rounded font-semibold tabular-nums"
+                    x-text="metaKpi[etapa].cumplimiento.toFixed(0) + '%'"></span>
+            </template>
+          </div>
+          <div class="flex items-baseline gap-1.5 mt-1">
+            <div class="text-lg md:text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums"
+                 x-text="(metaKpi[etapa] && metaKpi[etapa].real_ciclo != null) ? metaKpi[etapa].real_ciclo.toLocaleString('es-CO') : '—'"></div>
+            <div class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums"
+                 x-text="(metaKpi[etapa] && metaKpi[etapa].meta_ciclo_mtd) ? '/ ' + metaKpi[etapa].meta_ciclo_mtd.toLocaleString('es-CO') + ' MTD' : ''"></div>
+          </div>
+          <div class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums"
+               x-text="(metaKpi[etapa] && metaKpi[etapa].meta_ciclo) ? 'Meta ciclo: ' + metaKpi[etapa].meta_ciclo.toLocaleString('es-CO') : ''"></div>
+          <div class="mt-2 h-[36px]"><canvas :id="'spark-' + i"></canvas></div>
+        </div>
+      </template>
+      <div x-show="loading.metas" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center rounded-xl">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+
+    <!-- Tabla de cumplimiento -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cumplimiento de metas</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Meta vs Real por semana del ciclo · color según % cumplimiento</p>
+        </div>
+        <span x-show="metaCicloLabel" class="text-xs text-slate-500 dark:text-slate-400" x-text="metaCicloLabel"></span>
+      </div>
+      <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+        <table class="min-w-full text-xs md:text-sm" id="metas-table">
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+      </div>
+      <div id="metas-empty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+    </div>
+
+  </div><!-- /tab metas -->
+
+  <!-- ─────────── TAB: COSECHAS ─────────── -->
+  <div x-show="tab==='cosechas'" x-cloak class="space-y-4">
+
+    <!-- Sub-filtros del tab Cosechas -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa origen</label>
+          <select x-model="cosechaOrigen" @change="refreshCosechas()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <template x-for="e in etapasFull" :key="e.key">
+              <option :value="e.key" x-text="e.label"></option>
+            </template>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa destino</label>
+          <select x-model="cosechaDestino" @change="refreshCosechas()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <template x-for="e in etapasFull" :key="e.key">
+              <option :value="e.key" x-text="e.label"></option>
+            </template>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="g in [['semana','Semana'],['mes','Mes']]" :key="g[0]">
+              <button @click="cosechaGran=g[0]; refreshCosechas()"
+                :class="cosechaGran===g[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition" x-text="g[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400"
+                 :title="cosechaBucket==='iso' ? 'S0 = misma semana calendario que origen' : 'S0 = días 0-6 desde fecha origen'">Bucket
+            <span class="text-slate-400 normal-case" x-text="cosechaBucket==='iso' ? '· calendario ISO' : '· 7d desde origen'"></span>
+          </label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="b in [['iso','ISO'],['dias','7 días']]" :key="b[0]">
+              <button @click="cosechaBucket=b[0]; refreshCosechas()"
+                :class="cosechaBucket===b[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="b[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mostrar</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="m in [['pct','% cohorte'],['share','Share 100%'],['abs','Números']]" :key="m[0]">
+              <button @click="cosechaModo=m[0]; renderCosechasTable()"
+                :class="cosechaModo===m[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="m[1]"></button>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="mt-3 flex items-center justify-between flex-wrap gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400"
+            :title="cosechaConteo==='cohorte' ? 'Cada nid pertenece a UNA cohorte (su 1er evento)' : 'Cada nid puede estar en VARIAS cohortes (matchea volumen del funnel)'">Conteo
+            <span class="text-slate-400 normal-case"
+              x-text="cosechaConteo==='cohorte' ? '· 1er evento por nid' : '· como el tablero funnel'"></span>
+          </label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="m in [['cohorte','Cohorte'],['funnel','Funnel']]" :key="m[0]">
+              <button @click="cosechaConteo=m[0]; refreshCosechas()"
+                :class="cosechaConteo===m[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-3 py-2 transition whitespace-nowrap" x-text="m[1]"></button>
+            </template>
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer">
+          <input type="checkbox" x-model="cosechaAcum" @change="renderCosechasTable()" class="accent-brand-600">
+          Acumulativo
+        </label>
+      </div>
+    </div>
+
+    <!-- Tabla heatmap -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cosechas · <span x-text="cosechaTitle" class="text-brand-600 dark:text-brand-400"></span></h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">% de leads que pasan de la <em>etapa origen</em> a la <em>etapa destino</em> en N semanas/meses</p>
+        </div>
+        <span class="text-xs text-slate-500 dark:text-slate-400" x-text="cosechaSummary"></span>
+      </div>
+      <div class="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+        <table class="min-w-full text-xs md:text-sm" id="cosechas-table"></table>
+        <div x-show="loading.cosechas" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+          <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+        </div>
+      </div>
+      <div id="cosechas-empty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+    </div>
+
+  </div><!-- /tab cosechas -->
+
+  <!-- ─────────── TAB: PRECIOS + SUBSIDIOS ─────────── -->
+  <div x-show="tab==='precios'" x-cloak class="space-y-4">
+
+    <!-- Sub-filtros del tab Precios -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fecha</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="f in [['aprobacion','Aprobación'],['cierre','Cierre']]" :key="f[0]">
+              <button @click="psFechaTipo=f[0]; refreshPrecios()"
+                :class="psFechaTipo===f[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-3 py-2 transition whitespace-nowrap" x-text="f[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="g in [['mes','Mes'],['semana','Semana']]" :key="g[0]">
+              <button @click="psGran=g[0]; refreshPrecios()"
+                :class="psGran===g[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-3 py-2 transition whitespace-nowrap" x-text="g[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Área</label>
+          <select x-model="psArea" @change="refreshPrecios()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+            <option value="">Todas</option>
+            <template x-for="a in psAreas" :key="a"><option :value="a" x-text="a"></option></template>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+          <select x-model="psEquipo" @change="refreshPrecios()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+            <option value="">Todos</option>
+            <template x-for="e in psEquipos" :key="e"><option :value="e" x-text="e"></option></template>
+          </select>
+        </div>
+      </div>
+      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        Experimento <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">co-rangos-20260122</code> inicio 26-ene-2026.
+        Subsidio identificado por <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">subsidio_aprobado_lider='Si'</code>;
+        bolsas: 1ª = precio_intermedio − precio_minimo_prestamo; 2ª = final − precio_intermedio (si positivo).
+      </p>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Aprobados</div>
+        <div class="text-2xl font-bold mt-1" x-text="(psKpis.n_total||0).toLocaleString('es-CO')"></div>
+        <div class="text-[10px] text-slate-400 mt-1">
+          <span x-text="(psKpis.n_experimento||0).toLocaleString('es-CO')"></span> con experimento
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Con subsidio</div>
+        <div class="text-2xl font-bold mt-1" x-text="(psKpis.n_subsidios||0).toLocaleString('es-CO')"></div>
+        <div class="text-[10px] text-slate-400 mt-1">
+          Tasa: <span x-text="((psKpis.tasa_subsidio||0)*100).toFixed(1)+'%'"></span>
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Descuento vs valor</div>
+        <div class="text-2xl font-bold mt-1" x-text="((psKpis.desc_valor||0)*100).toFixed(1)+'%'"></div>
+        <div class="text-[10px] text-slate-400 mt-1">mediana</div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Descuento vs cliente</div>
+        <div class="text-2xl font-bold mt-1" x-text="((psKpis.desc_cliente||0)*100).toFixed(1)+'%'"></div>
+        <div class="text-[10px] text-slate-400 mt-1">mediana</div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Subsidio mediano</div>
+        <div class="text-2xl font-bold mt-1" x-text="'$'+((psKpis.subsidio_monto||0)/1e6).toFixed(1)+'M'"></div>
+        <div class="text-[10px] text-slate-400 mt-1">por deal con subsidio</div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Gasto total subsidios</div>
+        <div class="text-2xl font-bold mt-1" x-text="'$'+((psKpis.gasto_total||0)/1e9).toFixed(2)+'B'"></div>
+        <div class="text-[10px] text-slate-400 mt-1">en COP</div>
+      </div>
+    </div>
+
+    <!-- Descuentos -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Descuento vs valor vivienda (mediana)</h3>
+        <p class="text-xs text-slate-400 mb-2">(ask_price_post_remo − precio_oferta_base) / ask_price_post_remo</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-desc-valor"></canvas></div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Descuento vs precio cliente (mediana)</h3>
+        <p class="text-xs text-slate-400 mb-2">(ask_price − precio_oferta_base) / ask_price</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-desc-cliente"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Subsidios -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Tasa de uso del subsidio</h3>
+        <p class="text-xs text-slate-400 mb-2">% de aprobados con subsidio_aprobado_lider='Si'</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-tasa-sub"></canvas></div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Monto mediano del subsidio</h3>
+        <p class="text-xs text-slate-400 mb-2">Entre los deals con subsidio (intermedio − minimo)</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-monto-sub"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Bolsas + Gasto -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Gasto en subsidios por período</h3>
+        <p class="text-xs text-slate-400 mb-2">Bolsa 1 (apilada con bolsa 2) en millones COP</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-gasto"></canvas></div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
+        <h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Uso de bolsas (sólo experimento)</h3>
+        <p class="text-xs text-slate-400 mb-2">% deals con subsidio que usaron sólo 1ª vs 1ª+2ª bolsa</p>
+        <div class="relative h-[260px]"><canvas id="ps-chart-bolsas"></canvas></div>
+      </div>
+    </div>
+
+  </div><!-- /tab precios -->
+
+  <p class="text-center text-xs text-slate-400 dark:text-slate-500 pt-2 pb-4">
+    Datos refrescados en tiempo real desde BigQuery · caché 5 min
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/funnel_mm.js?v=10"></script>
+{% endblock %}

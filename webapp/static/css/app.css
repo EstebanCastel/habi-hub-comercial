@@ -1,0 +1,8 @@
+/* Custom overrides minimal — most styling via Tailwind utilities */
+[x-cloak] { display: none !important; }
+
+/* Suavizar focus ring */
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}

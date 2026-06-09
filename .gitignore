@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Local dev
+/tmp/
+*.tmp
+
+# Reports legacy generados por update_all.py (no necesarios para el webapp)
+reports/funnel/index.html
+reports/funnel_inmo/index.html
+reports/conversion_seller/index.html
+reports/metas_inmo_ciclo4/index.html
+
+# Excels grandes (ya tenemos CSV exportado)
+Metas Comerciales.xlsx
+
+# Presentación local (PNG/HTML generados manualmente)
+presentation/*.png
+presentation/*.html
+
+# Preview screenshots de desarrollo
+webapp/preview_*.png
+
+# Cache de Looker / browser
+.cache/
+
+# Credenciales locales (nunca commitear)
+*.json
+!reports/comercial_cycles.json
+!**/credentials.json.example
+.env
+.env.*
+cloudflared

@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+{% block title %}Funnel Inmo · {{ app_name }}{% endblock %}
+
+{% block content %}
+{% macro ms(name, label, all_label="Todos") %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','cat_com':'cats_com','prioridad':'prioridades','area':'areas'}[name] }}, () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        ({{ all_label }})
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+<div
+  x-data="funnelInmo()"
+  data-fecha-desde="{{ fecha_desde }}"
+  data-fecha-hasta="{{ fecha_hasta }}"
+  class="space-y-4"
+>
+  <!-- Header -->
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Funnel Comercial · Inmobiliaria</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-xs md:text-sm mt-1">Pipeline 'Nuevo - Inmobiliaria CO' — data live desde BigQuery</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-slate-400 dark:text-slate-500">Rango: <span x-text="fechaDesde"></span> → <span x-text="fechaHasta"></span></span>
+      <button @click="forceRefresh()" :disabled="refreshing"
+        class="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" :class="refreshing && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="refreshing ? 'Actualizando…' : 'Actualizar datos'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['volumen','Volumen'],['metas','Metas']]" :key="t[0]">
+        <button @click="switchTab(t[0])"
+          :class="tab===t[0]
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400'
+            : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+      {{ ms('equipo', 'Equipo') }}
+      {{ ms('cat_com', 'Cat. comercial', 'Todas') }}
+      {{ ms('prioridad', 'Prioridad', 'Todas') }}
+      {{ ms('area', 'Área') }}
+
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
+        <input type="date" x-model="fechaDesde" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Hasta</label>
+        <input type="date" x-model="fechaHasta" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+
+      <div class="flex flex-col gap-1 min-w-0 col-span-2 sm:col-span-3 lg:col-span-3 xl:col-span-1">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+        <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+          <template x-for="g in [['mes','Mes'],['semana','Sem'],['dia','Día'],['mes_com','Mes com.'],['sem_com','Sem. com.']]" :key="g[0]">
+            <button @click="granularidad=g[0]; refresh()"
+              :class="granularidad===g[0]
+                ? 'bg-brand-600 text-white'
+                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+              class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="g[1]"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3 flex items-center justify-between gap-2 flex-wrap">
+      <label class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer"
+             title="Excluye los 8.290 nids que se marcaron por error como Captado el 7-abr-2026">
+        <input type="checkbox" x-model="excludeIncidente" @change="refresh()" class="accent-brand-600">
+        Excluir incidente 7-abr (8.290 nids)
+      </label>
+      <button @click="resetFilters()" class="text-xs md:text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
+        Limpiar filtros
+      </button>
+    </div>
+  </div>
+
+  <!-- ─────────── TAB: VOLUMEN ─────────── -->
+  <div x-show="tab==='volumen'" class="space-y-4">
+
+  <!-- KPIs -->
+  <div
+    id="kpis-section"
+    hx-get="/funnel/inmo/kpis"
+    hx-trigger="load, refresh-kpis from:body"
+    hx-vals="js:{...filterParams()}"
+    hx-include="none"
+    class="min-h-[120px]"
+  >
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {% for _ in range(6) %}
+        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Volumen chart -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">Volumen por etapa</h2>
+      <span class="text-xs text-slate-400 dark:text-slate-500">Distinct nids por período</span>
+    </div>
+    <div class="relative h-[300px] md:h-[420px]">
+      <canvas id="chart-volumen"></canvas>
+      <div x-show="loading.volumen" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share prioridad -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-3">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Share de prioridad</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Distribución por prioridad de gestión inmo de los inmuebles en <em>Asignados</em></p>
+      </div>
+      <div class="flex items-end gap-3">
+        <label class="inline-flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-300 select-none">
+          <input type="checkbox" class="accent-brand-600" x-model="shareCatExcluirSin" @change="$nextTick(() => renderShareCat(lastShareCatData))">
+          <span>Excluir <em>Sin categoría</em></span>
+        </label>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 md:gap-6 items-start">
+      <div>
+        <div class="relative h-[160px]"><canvas id="chart-share-donut"></canvas></div>
+        <div id="share-legend" class="mt-3 space-y-1.5 text-sm"></div>
+      </div>
+      <div class="relative h-[280px]">
+        <canvas id="chart-share-bars"></canvas>
+        <div x-show="loading.shareCat" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+          <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tasa de conversión -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Tasa de conversión en el tiempo</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">CVR = suma(<em>Numerador</em>) ÷ suma(<em>Denominador</em>) · respeta granularidad y filtros</p>
+      </div>
+      <span id="conv-totals" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:max-w-md gap-3 mb-3">
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Numerador</label>
+        <div x-data="multiSelect('convNum', () => etapasList, () => refreshConvTime())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Denominador</label>
+        <div x-data="multiSelect('convDen', () => etapasList, () => refreshConvTime())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+                   bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="relative h-[300px] md:h-[360px]">
+      <canvas id="chart-conv-time"></canvas>
+      <div x-show="loading.convTime" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Listado de negocios -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Listado de negocios</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Datos crudos por nid · respeta filtros · rango de fechas filtra por la fecha de la <em>etapa seleccionada</em></p>
+      </div>
+      <span id="negocios-count" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-3 mb-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa alcanzada</label>
+        <select x-model="negociosEtapa" @change="negociosPage=1; refreshNegocios()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+          <option value="fecha_asignacion">Asignación</option>
+          <option value="fecha_perfilado">Perfilado</option>
+          <option value="fecha_comite">Comité</option>
+          <option value="fecha_aprobado">Aprobado</option>
+          <option value="fecha_ofertado">Ofertado</option>
+          <option value="fecha_aceptada">Aceptada</option>
+          <option value="fecha_captado">Captado</option>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Buscar nid</label>
+        <input type="text" x-model.debounce.300ms="negociosSearch" @input="negociosPage=1; refreshNegocios()"
+          placeholder="nid contiene…"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex items-end">
+        <button @click="exportNegocios()" class="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition">Exportar CSV</button>
+      </div>
+    </div>
+
+    <div class="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table class="min-w-full text-xs md:text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider">
+          <tr>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">nid</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Equipo</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Cat. com.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Prioridad</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Área</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Asig.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Perfil.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Comité</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Aprob.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Ofert.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Acept.</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Captado</th>
+          </tr>
+        </thead>
+        <tbody id="negocios-tbody" class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+          <tr><td colspan="12" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
+        </tbody>
+      </table>
+      <div x-show="loading.negocios" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-2 mt-3 text-sm">
+      <span id="negocios-pageinfo" class="text-slate-500 dark:text-slate-400">—</span>
+      <div class="flex gap-2">
+        <button @click="negociosPage > 1 && (negociosPage--, refreshNegocios())"
+          class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40"
+          :disabled="negociosPage === 1">← Anterior</button>
+        <button @click="negociosPage++; refreshNegocios();"
+          class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40"
+          :disabled="!negociosHasMore">Siguiente →</button>
+      </div>
+    </div>
+  </div>
+  </div><!-- /tab volumen -->
+
+  <!-- ─────────── TAB: METAS ─────────── -->
+  <div x-show="tab==='metas'" x-cloak class="space-y-4">
+
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Ciclo</label>
+          <select x-model.number="metaCiclo" @change="refreshMetas()"
+            class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+            <template x-for="c in metaCycles" :key="c.ciclo">
+              <option :value="c.ciclo" x-text="'Ciclo ' + c.ciclo + ' — ' + c.mes + ' ' + c.year"></option>
+            </template>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desglose</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="d in [['total','Total'],['equipo','Equipo'],['categoria','Categoría']]" :key="d[0]">
+              <button @click="metaDesglose=d[0]; refreshMetas()"
+                :class="metaDesglose===d[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition" x-text="d[1]"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Vista</label>
+          <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+            <template x-for="v in [['semanal','Semanal'],['acumulado','Acumulado']]" :key="v[0]">
+              <button @click="metaVista=v[0]; renderMetaTable()"
+                :class="metaVista===v[0]
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 px-2 py-2 transition" x-text="v[1]"></button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 relative min-h-[120px]">
+      <template x-for="(etapa, i) in metaEtapas" :key="etapa">
+        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 hover:shadow-md dark:hover:shadow-brand-900/20 transition">
+          <div class="flex items-center justify-between gap-1">
+            <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400" x-text="etapa"></div>
+            <template x-if="metaKpi[etapa] && metaKpi[etapa].cumplimiento != null">
+              <span :class="metaKpi[etapa].cumplimiento >= 100 ? 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-900/30'
+                            : metaKpi[etapa].cumplimiento >= 80 ? 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-900/30'
+                            : 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-900/30'"
+                    class="text-[10px] px-1.5 py-0.5 rounded font-semibold tabular-nums"
+                    x-text="metaKpi[etapa].cumplimiento.toFixed(0) + '%'"></span>
+            </template>
+          </div>
+          <div class="flex items-baseline gap-1.5 mt-1">
+            <div class="text-lg md:text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums"
+                 x-text="(metaKpi[etapa] && metaKpi[etapa].real_ciclo != null) ? metaKpi[etapa].real_ciclo.toLocaleString('es-CO') : '—'"></div>
+            <div class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums"
+                 x-text="(metaKpi[etapa] && metaKpi[etapa].meta_ciclo_mtd) ? '/ ' + Math.round(metaKpi[etapa].meta_ciclo_mtd).toLocaleString('es-CO') + ' MTD' : ''"></div>
+          </div>
+          <div class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums"
+               x-text="(metaKpi[etapa] && metaKpi[etapa].meta_ciclo) ? 'Meta ciclo: ' + Math.round(metaKpi[etapa].meta_ciclo).toLocaleString('es-CO') : ''"></div>
+          <div class="mt-2 h-[36px]"><canvas :id="'spark-inmo-' + i"></canvas></div>
+        </div>
+      </template>
+      <div x-show="loading.metas" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center rounded-xl">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cumplimiento de metas</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+            Meta vs Real por semana del ciclo · color según % cumplimiento.
+            <span class="block mt-0.5 text-slate-500 dark:text-slate-500">
+              Real = nids que pasaron por la etapa del pipeline Inmo (eventos). Distinto de la atribución por comercial en <em>Conversión Seller</em>.
+            </span>
+          </p>
+        </div>
+        <span x-show="metaCicloLabel" class="text-xs text-slate-500 dark:text-slate-400" x-text="metaCicloLabel"></span>
+      </div>
+      <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+        <table class="min-w-full text-xs md:text-sm" id="metas-table">
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+      </div>
+      <div id="metas-empty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+    </div>
+  </div><!-- /tab metas -->
+
+  <p class="text-center text-xs text-slate-400 dark:text-slate-500 pt-2 pb-4">
+    Datos refrescados en tiempo real desde BigQuery · caché 5 min
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/funnel_inmo.js?v=4"></script>
+{% endblock %}

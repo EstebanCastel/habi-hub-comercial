@@ -1,0 +1,24 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+.DS_Store
+.venv
+venv
+node_modules
+logs/
+*.log
+/tmp/
+# Reports legacy (HTML estáticos generados por update_all.py) — no van al webapp
+reports/funnel/index.html
+reports/funnel_inmo/index.html
+reports/conversion_seller/index.html
+reports/metas_inmo_ciclo4/
+# Presentación (PNG/HTML) — no parte del webapp
+presentation/
+hub/
+# Excels grandes — solo usamos el CSV ya exportado
+Metas Comerciales.xlsx
+# Caché de Python
+**/*.pyc
+**/__pycache__
