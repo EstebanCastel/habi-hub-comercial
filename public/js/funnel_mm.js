@@ -294,10 +294,18 @@ function funnelMM() {
       this.metaConfig = await r.json();
       this.metaCycles = this.metaConfig.cycles || [];
       this.metaEtapas = this.metaConfig.etapas || [];
-      // Default: ciclo del mes actual (o el último con metas)
-      const today = new Date().toISOString().slice(0,10);
-      const currentCiclo = this.metaCycles.find(c => c.inicio <= today && today <= c.fin);
-      this.metaCiclo = (currentCiclo || this.metaCycles[this.metaCycles.length-1] || {}).ciclo || 0;
+      
+      // Auto-select the last cycle that HAS metas defined (not just current date)
+      const metasByCiclo = this.metaConfig.metas || {};
+      const ciclosConMetas = this.metaCycles.filter(c => 
+        Object.keys(metasByCiclo).some(etapa => 
+          Object.keys(metasByCiclo[etapa] || {}).some(bucket => 
+            Object.keys(metasByCiclo[etapa][bucket] || {}).some(wk => wk.startsWith(`${c.ciclo}-`))
+          )
+        )
+      );
+      
+      this.metaCiclo = (ciclosConMetas[ciclosConMetas.length - 1] || this.metaCycles[this.metaCycles.length - 1] || {}).ciclo || 0;
       this.refreshMetas();
     },
 
