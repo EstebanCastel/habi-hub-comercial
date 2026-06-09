@@ -107,6 +107,8 @@ function funnelInmo() {
     filtersOptions: { equipos:[], cats_com:[], prioridades:[], areas:[] },
     etapasList: [],
     loading: { volumen: false, kpis: false, shareCat: false, convTime: false, negocios: false, metas: false },
+    kpisData: [],
+    kpisMeta: {},
     negociosEtapa: "fecha_asignacion",
     negociosSearch: "",
     negociosPage: 1,
@@ -159,6 +161,7 @@ function funnelInmo() {
         this.refreshShareCat();
         this.refreshConvTime();
         this.refreshNegocios();
+        this.refreshKpis();
         if (this.tab === "metas" && !this.metasInited) this.initMetas();
       });
     },
@@ -182,7 +185,7 @@ function funnelInmo() {
         this.refreshShareCat();
         this.refreshConvTime();
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
       } finally {
         setTimeout(() => { this.refreshing = false; }, 800);
@@ -197,7 +200,7 @@ function funnelInmo() {
         this.refreshConvTime();
         this.negociosPage = 1;
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
       }, 200);
     },
@@ -451,6 +454,20 @@ function funnelInmo() {
       a.download = `negocios_inmo_${new Date().toISOString().slice(0,10)}.csv`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    },
+
+    async refreshKpis() {
+      this.loading.kpis = true;
+      try {
+        const r = await fetch(`/api/funnel/inmo?action=kpis&${buildQS(filterParamsInmo())}`);
+        const d = await r.json();
+        this.kpisData = d.kpis || [];
+        this.kpisMeta = { label_actual: d.label_actual, label_anterior: d.label_anterior, dia_corte: d.dia_corte };
+      } catch (e) {
+        console.error('[funnelInmo] refreshKpis error:', e);
+      } finally {
+        this.loading.kpis = false;
+      }
     },
 
     async refreshVolumen() {

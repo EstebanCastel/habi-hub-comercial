@@ -125,6 +125,8 @@ function funnelMM() {
     filtersOptions: { equipos:[], cats_com:[], cats:[], recurrencias:[], fuentes:[], areas:[] },
     etapasList: [],
     loading: { volumen: false, kpis: false, shareCat: false, convTime: false, negocios: false, metas: false, cosechas: false, precios: false },
+    kpisData: [],
+    kpisMeta: {},
     negociosEtapa: "fecha_asignacion",
     negociosSearch: "",
     negociosPage: 1,
@@ -210,6 +212,7 @@ function funnelMM() {
         this.refreshShareCat();
         this.refreshConvTime();
         this.refreshNegocios();
+        this.refreshKpis();
         if (this.tab === "metas" && !this.metasInited) this.initMetas();
         if (this.tab === "cosechas" && !this.cosechasInited) {
           this.cosechasInited = true;
@@ -242,9 +245,8 @@ function funnelMM() {
         this.refreshShareCat();
         this.refreshConvTime();
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
-        if (this.tab === "cosechas" && this.cosechasInited) this.refreshCosechas();
       } finally {
         // Espera un poquito para que el spinner sea visible aunque cache fresco
         setTimeout(() => { this.refreshing = false; }, 800);
@@ -259,7 +261,7 @@ function funnelMM() {
         this.refreshConvTime();
         this.negociosPage = 1;
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
         if (this.tab === "cosechas" && this.cosechasInited) this.refreshCosechas();
         if (this.tab === "precios" && this.preciosInited) this.refreshPrecios();
@@ -567,6 +569,20 @@ function funnelMM() {
       a.download = `negocios_mm_${new Date().toISOString().slice(0,10)}.csv`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    },
+
+    async refreshKpis() {
+      this.loading.kpis = true;
+      try {
+        const r = await fetch(`/api/funnel/mm?action=kpis&${buildQS(filterParams())}`);
+        const d = await r.json();
+        this.kpisData = d.kpis || [];
+        this.kpisMeta = { label_actual: d.label_actual, label_anterior: d.label_anterior, dia_corte: d.dia_corte };
+      } catch (e) {
+        console.error('[funnelMM] refreshKpis error:', e);
+      } finally {
+        this.loading.kpis = false;
+      }
     },
 
     async refreshVolumen() {

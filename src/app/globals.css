@@ -1,6 +1,24 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@source "../templates/**/*.html";
+@source "../../public/**/*.js";
+
+/* Dark mode via 'dark' class on html element */
+@variant dark (&:where(.dark, .dark *));
+
+/* Brand color = indigo/violet */
+@theme {
+  --color-brand-50: oklch(97% 0.02 277);
+  --color-brand-100: oklch(93% 0.04 277);
+  --color-brand-200: oklch(87% 0.08 277);
+  --color-brand-300: oklch(79% 0.13 277);
+  --color-brand-400: oklch(70% 0.19 277);
+  --color-brand-500: oklch(60% 0.24 277);
+  --color-brand-600: oklch(52% 0.26 277);
+  --color-brand-700: oklch(44% 0.24 277);
+  --color-brand-800: oklch(37% 0.20 277);
+  --color-brand-900: oklch(30% 0.15 277);
+  --color-brand-950: oklch(22% 0.10 277);
+}
 
 [x-cloak] { display: none !important; }
 :focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }

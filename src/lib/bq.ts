@@ -11,12 +11,37 @@ let client: InstanceType<typeof BigQuery> | null = null;
 
 function getClient(): InstanceType<typeof BigQuery> {
   if (!client) {
-    // Support GOOGLE_APPLICATION_CREDENTIALS env var (file path)
-    // or GOOGLE_CREDENTIALS env var (JSON string, for Vercel)
-    const credentials = process.env.GOOGLE_CREDENTIALS
-      ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
-      : undefined;
-    client = new BigQuery({ projectId: DEFAULT_PROJECT, credentials });
+    const raw = process.env.GOOGLE_CREDENTIALS;
+    if (raw) {
+      const creds = JSON.parse(raw);
+      if (creds.type === 'authorized_user') {
+        // OAuth2 user credentials (ADC style)
+        // BigQuery client accepts these via the credentials option
+        client = new BigQuery({
+          projectId: DEFAULT_PROJECT,
+          credentials: {
+            client_email: creds.account || '',
+            private_key: '',
+          },
+          // For authorized_user, we pass the full credential as-is
+          // The BigQuery client will use the refresh token
+        });
+        // Actually, for authorized_user we need to use a different approach
+        // Write to a temp file and use GOOGLE_APPLICATION_CREDENTIALS
+        const fs = require('fs');
+        const path = require('path');
+        const tmpFile = path.join(process.env.TMPDIR || '/tmp', 'gcp-creds.json');
+        fs.writeFileSync(tmpFile, raw);
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpFile;
+        client = new BigQuery({ projectId: DEFAULT_PROJECT });
+      } else {
+        // Service account credentials
+        client = new BigQuery({ projectId: DEFAULT_PROJECT, credentials: creds });
+      }
+    } else {
+      // Fall back to ADC (local dev with gcloud auth)
+      client = new BigQuery({ projectId: DEFAULT_PROJECT });
+    }
   }
   return client;
 }

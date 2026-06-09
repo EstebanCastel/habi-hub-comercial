@@ -228,29 +228,34 @@
   <!-- ─────────── TAB: VOLUMEN ─────────── -->
   <div x-show="tab==='volumen'" class="space-y-4">
 
-  <!-- KPIs -->
-  <div
-    id="kpis-section"
-    hx-get="/api/funnel/mm?action=kpis"
-    hx-trigger="load, refresh-kpis from:body"
-    hx-vals="js:{...filterParams()}"
-    hx-include="none"
-    class="min-h-[120px]"
-  >
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      
+  <!-- KPIs — rendered via Alpine.js from JSON (API returns JSON, not HTML) -->
+  <div id="kpis-section" class="min-h-[120px]">
+    <!-- Skeleton while loading -->
+    <div x-show="loading.kpis" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <template x-for="i in 6" :key="i">
         <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
-        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
-        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
-        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
-        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
-        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 animate-pulse h-[110px]"></div>
-      
+      </template>
+    </div>
+    <!-- KPI cards -->
+    <div x-show="!loading.kpis && kpisData.length > 0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <template x-for="kpi in kpisData" :key="kpi.label">
+        <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 md:p-4 hover:shadow-md dark:hover:shadow-brand-900/20 transition">
+          <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400" x-text="kpi.label"></div>
+          <div class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 tabular-nums" x-text="kpi.actual != null ? kpi.actual.toLocaleString('es-CO') : '—'"></div>
+          <div class="flex items-center justify-between text-[10px] md:text-[11px] mt-2 gap-1">
+            <span class="text-slate-400 dark:text-slate-500 truncate" x-text="kpisMeta.label_anterior ? (kpi.anterior != null ? kpi.anterior.toLocaleString('es-CO') : '—') + ' ' + kpisMeta.label_anterior : ''"></span>
+            <span class="px-1.5 py-0.5 rounded font-semibold"
+              :class="kpi.delta == null ? 'text-slate-400' : kpi.delta >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'"
+              x-text="kpi.delta != null ? (kpi.delta >= 0 ? '+' : '') + kpi.delta.toFixed(1) + '%' : '—'"
+            ></span>
+          </div>
+        </div>
+      </template>
+    </div>
+    <!-- MTD label -->
+    <div x-show="!loading.kpis && kpisMeta.label_actual" class="text-[10px] text-slate-400 dark:text-slate-500 mt-2">
+      MTD <span x-text="kpisMeta.label_actual"></span> vs <span x-text="kpisMeta.label_anterior"></span>
+      <span x-show="kpisMeta.dia_corte"> (día <span x-text="kpisMeta.dia_corte"></span>)</span>
     </div>
   </div>
 
