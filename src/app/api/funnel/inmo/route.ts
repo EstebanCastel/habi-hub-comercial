@@ -46,17 +46,20 @@ const ETAPAS_INMO = [
 // ── Metas Inmo model (ported from metas_inmo.py) ────────────────────────────
 
 const LEADS_TOTAL = 6500;
-const ABRIL_ASIG: Record<string, number> = { Bogotá: 4270, Medellín: 786, Barranquilla: 459, Cali: 400 };
+// Asignados por área metropolitana, mayo 2026 ('Valle de Aburrá' → Medellín). Escenario A Ciclo 5.
+const MAYO_ASIG: Record<string, number> = { Bogotá: 4261, Medellín: 811, Barranquilla: 330, Cali: 519 };
 const CAT_SHARE: Record<string, number> = { A: 0.0486, B: 0.2757, C: 0.6757 };
 const CAT_CVR: Record<string, number>   = { A: 0.25,   B: 0.09,   C: 0.046 };
 const FLAT_CVR_EQ: Record<string, number> = { Cali: 0.06, Barranquilla: 0.067, Medellín: 0.04 };
 
+// CVRs del funnel — mayo 2026 (nids por etapa: asignados=8.946 · perfilados=3.202 ·
+// aprobado=1.312 · ofertado=1.128 · aceptada=659 · captado=427).
 const HISTORICAL_CVRS = {
-  asig_to_perf:   3459 / 12356,
-  perf_to_aprob:  2605 / 3459,
-  aprob_to_ofert: 1609 / 2605,
-  ofert_to_ace:   1229 / 1609,
-  ace_to_cap:     860  / 1229,
+  asig_to_perf:   3202 / 8946,
+  perf_to_aprob:  1312 / 3202,
+  aprob_to_ofert: 1128 / 1312,
+  ofert_to_ace:   659  / 1128,
+  ace_to_cap:     427  / 659,
 };
 
 const TARGET_EQUIPOS = ['Inmobiliaria 1', 'Inmobiliaria 2', 'Medellín', 'Cali', 'Barranquilla'];
@@ -65,7 +68,7 @@ const EQUIPO_CIUDAD: Record<string, string> = {
   'Medellín': 'Medellín', 'Cali': 'Cali', 'Barranquilla': 'Barranquilla',
 };
 
-const CICLO_DEFAULT = 4;
+const CICLO_DEFAULT = 5;
 const N_SEMANAS_DEFAULT = 4;
 
 const ETAPAS_ORDER = ['Asignados', 'Perfilados', 'Aprobados', 'Ofertados', 'Aceptadas', 'Captados'];
@@ -100,9 +103,9 @@ function loadMetas(comerciales: Record<string, string>[]): Record<string, Record
     c => (c.categoria || '').startsWith('Inmobiliaria') && TARGET_EQUIPOS.includes(c.equipo)
   );
 
-  const totalHist = Object.values(ABRIL_ASIG).reduce((a, b) => a + b, 0);
+  const totalHist = Object.values(MAYO_ASIG).reduce((a, b) => a + b, 0);
   const ciudadLeads: Record<string, number> = {};
-  for (const [c, v] of Object.entries(ABRIL_ASIG)) ciudadLeads[c] = LEADS_TOTAL * v / totalHist;
+  for (const [c, v] of Object.entries(MAYO_ASIG)) ciudadLeads[c] = LEADS_TOTAL * v / totalHist;
 
   const nByEqCat: Record<string, Record<string, number>> = {};
   for (const eq of TARGET_EQUIPOS) nByEqCat[eq] = { A: 0, B: 0, C: 0 };
