@@ -617,14 +617,7 @@ async function handleConvTime(params: URLSearchParams) {
   if (prioridadMm?.length) {
     where += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
   }
-  // Para "1ª vez vs recomité" se necesita el PRIMER comité histórico de cada nid:
-  // misma lógica de filtros pero sin el límite inferior de fecha.
-  let whereFirst = _buildWhere('2020-01-01', fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
-  if (prioridadMm?.length) {
-    whereFirst += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
-  }
   const [groupF] = _groupExpr(granularidad);
-  const [groupFirst] = _groupExpr(granularidad, 'sf.first_d');
 
   const eventParts: string[] = [];
   if (funnelEtapas.length) {
@@ -666,14 +659,13 @@ async function handleConvTime(params: URLSearchParams) {
   }
 
   if (useSeg) {
-    // Eventos de pre-comité dentro de la ventana, etiquetados 1ª vez / recomité
-    // según si el primer comité histórico del nid cae en este mismo periodo.
+    // Etiqueta cada pre-comité por su flag de recurrencia (igual que Looker):
+    // 'Primer gestión' = 1ª vez; cualquier otro valor = recomité.
     eventParts.push(`
         SELECT ${groupF} AS periodo,
-               IF(${groupFirst} = ${groupF}, '${SEG_FIRST}', '${SEG_RE}') AS etapa,
+               IF(NORMALIZE(COALESCE(f.flag_recurrecia_gestion, ''), NFC) = 'Primer gestión', '${SEG_FIRST}', '${SEG_RE}') AS etapa,
                CAST(f.nid AS STRING) AS cid
         FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
-        JOIN seg_first sf ON sf.nid = CAST(f.nid AS STRING)
         LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
         LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
         WHERE ${where}
@@ -682,24 +674,11 @@ async function handleConvTime(params: URLSearchParams) {
 
   const eventsSql = eventParts.join('\n        UNION ALL\n');
 
-  const segCte = useSeg
-    ? `,
-    seg_first AS (
-      SELECT CAST(f.nid AS STRING) AS nid, MIN(DATE(f.fecha)) AS first_d
-      FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
-      LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
-      LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
-      WHERE ${whereFirst}
-        AND f.valor = 'pre-comité validado'
-      GROUP BY 1
-    )`
-    : '';
-
   // Columnas por cada etapa del numerador (para dibujar una línea por etapa cuando hay 2+)
   const numCols = num.map((e, i) => `COUNT(DISTINCT IF(etapa = '${e.replace(/'/g, "''")}', cid, NULL)) AS num_${i}`).join(',\n      ');
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})${segCte},
+    WITH comerciales AS (${_comercialesUnnest()}),
     events AS (${eventsSql})
     SELECT
       periodo,
