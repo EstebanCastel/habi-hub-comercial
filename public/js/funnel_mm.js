@@ -15,6 +15,8 @@ document.addEventListener("alpine:init", () => {
     convTimeEquipo: [],
     convTimeArea: [],
     convTimePrioridadMM: [],
+    convInclBuffers: false,  // incluir buffers (como Looker)
+    convExclDias: false,     // excluir días 1-2 del mes (alinear al ciclo)
   });
 });
 
@@ -643,6 +645,9 @@ function funnelMM() {
         if ((s.convTimeEquipo      || []).length) params.equipo       = s.convTimeEquipo;
         if ((s.convTimeArea        || []).length) params.area         = s.convTimeArea;
         if ((s.convTimePrioridadMM || []).length) params.prioridad_mm = s.convTimePrioridadMM;
+        // Igualar a Looker
+        if (s.convInclBuffers) params.incl_buffers = 1;
+        if (s.convExclDias) params.excl_dias = 1;
         const r = await fetch(`/api/funnel/mm?action=conv-time&${buildQS(params)}`);
         this.renderConvTime(await r.json());
       } finally {

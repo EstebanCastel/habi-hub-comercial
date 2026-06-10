@@ -469,8 +469,17 @@
       </div>
     </div>
 
-    
-    
+    <!-- Igualar a Looker -->
+    <div class="flex flex-wrap items-center gap-4 mb-3">
+      <label class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+        <input type="checkbox" class="accent-brand-600" x-model="$store.filters.convInclBuffers" @change="refreshConvTime()">
+        Incluir buffers (como Looker)
+      </label>
+      <label class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+        <input type="checkbox" class="accent-brand-600" x-model="$store.filters.convExclDias" @change="refreshConvTime()">
+        Excluir días 1-2 del mes (alinear al ciclo)
+      </label>
+    </div>
 
     <!-- Filtros locales (sólo esta sección · sobrescriben los globales) -->
     <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4">

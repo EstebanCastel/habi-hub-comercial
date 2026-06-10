@@ -197,13 +197,14 @@ function _buildWhere(
   recurrencia?: string[] | null,
   fuentes?: string[] | null,
   areas?: string[] | null,
+  skipBuffers = false,
 ): string {
   const conds: string[] = [
     `DATE(f.fecha) >= '${fechaDesde}'`,
     `DATE(f.fecha) <= '${fechaHasta}'`,
     `f.valor NOT IN (${_quoteList(EXCLUDE_ETAPAS)})`,
-    sqlNotIn('f.hubspot_owner_id', BUFFER_EMAILS),
   ];
+  if (!skipBuffers) conds.push(sqlNotIn('f.hubspot_owner_id', BUFFER_EMAILS));
   if (equipos?.length) {
     conds.push(`COALESCE(c.equipo, 'Sin equipo') IN (${_quoteList(equipos)})`);
   }
@@ -613,9 +614,16 @@ async function handleConvTime(params: URLSearchParams) {
   const useSeg = [...num, ...den].some(x => SEG.includes(x));
   const funnelEtapas = [...new Set([...num, ...den].filter(x => x !== 'Lead' && x !== 'Lead (filas)' && !SEG.includes(x)))].sort();
 
-  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  // Igualar a Looker: incluir buffers (no excluirlos) y/o excluir días 1-2 del mes.
+  const inclBuffers = getString(params, 'incl_buffers', '') === '1';
+  const exclDias = getString(params, 'excl_dias', '') === '1';
+
+  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, inclBuffers);
   if (prioridadMm?.length) {
     where += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
+  }
+  if (exclDias) {
+    where += `\n  AND EXTRACT(DAY FROM DATE(f.fecha)) >= 3`;
   }
   const [groupF] = _groupExpr(granularidad);
 
