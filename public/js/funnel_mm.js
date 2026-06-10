@@ -290,7 +290,7 @@ function funnelMM() {
 
     async initMetas() {
       this.metasInited = true;
-      const r = await fetch("/api/funnel/mm?action=metas/config");
+      const r = await fetch("/api/funnel/mm?action=metas-config");
       this.metaConfig = await r.json();
       this.metaCycles = this.metaConfig.cycles || [];
       this.metaEtapas = this.metaConfig.etapas || [];
@@ -320,8 +320,8 @@ function funnelMM() {
         params.desglose = this.metaDesglose;
         if (this.metaAsumeArea) params.asume_area = "true";
         const [realRes, kpiRes] = await Promise.all([
-          fetch(`/api/funnel/mm?action=metas/real&${buildQS(params)}`).then(r => r.json()),
-          fetch(`/api/funnel/mm?action=metas/kpi-tendencias&${buildQS(params)}`).then(r => r.json()),
+          fetch(`/api/funnel/mm?action=metas-real&${buildQS(params)}`).then(r => r.json()),
+          fetch(`/api/funnel/mm?action=metas-kpi-tendencias&${buildQS(params)}`).then(r => r.json()),
         ]);
         this.metaReal = realRes;
         this.metaKpi = kpiRes.series || {};
