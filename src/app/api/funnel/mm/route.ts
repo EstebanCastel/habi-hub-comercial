@@ -355,6 +355,8 @@ async function handleEtapas() {
     { key: 'Lead',         label: 'Lead (nid)' },
     { key: 'Lead (filas)', label: 'Lead (filas tabla)' },
     ...ETAPAS_MM.map(e => ({ key: e.key, label: e.label })),
+    { key: 'Pre-comité (1ª vez)',   label: 'Pre-comité (1ª vez)' },
+    { key: 'Pre-comité (recomité)', label: 'Pre-comité (recomité)' },
   ];
   return NextResponse.json(items);
 }
@@ -601,15 +603,28 @@ async function handleConvTime(params: URLSearchParams) {
   if (!num) num = ['Cierre - Comprado'];
   if (!den) den = ['Primer_asigancion'];
 
+  // Etapas sintéticas: pre-comité segregado en 1ª vez vs recomité (por nid, definición B)
+  const SEG_FIRST = 'Pre-comité (1ª vez)';
+  const SEG_RE = 'Pre-comité (recomité)';
+  const SEG = [SEG_FIRST, SEG_RE];
+
   const useLead = num.includes('Lead') || den.includes('Lead');
   const useLeadRows = num.includes('Lead (filas)') || den.includes('Lead (filas)');
-  const funnelEtapas = [...new Set([...num, ...den].filter(x => x !== 'Lead' && x !== 'Lead (filas)'))].sort();
+  const useSeg = [...num, ...den].some(x => SEG.includes(x));
+  const funnelEtapas = [...new Set([...num, ...den].filter(x => x !== 'Lead' && x !== 'Lead (filas)' && !SEG.includes(x)))].sort();
 
   let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
   if (prioridadMm?.length) {
     where += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
   }
+  // Para "1ª vez vs recomité" se necesita el PRIMER comité histórico de cada nid:
+  // misma lógica de filtros pero sin el límite inferior de fecha.
+  let whereFirst = _buildWhere('2020-01-01', fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  if (prioridadMm?.length) {
+    whereFirst += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
+  }
   const [groupF] = _groupExpr(granularidad);
+  const [groupFirst] = _groupExpr(granularidad, 'sf.first_d');
 
   const eventParts: string[] = [];
   if (funnelEtapas.length) {
@@ -650,10 +665,38 @@ async function handleConvTime(params: URLSearchParams) {
     }
   }
 
+  if (useSeg) {
+    // Eventos de pre-comité dentro de la ventana, etiquetados 1ª vez / recomité
+    // según si el primer comité histórico del nid cae en este mismo periodo.
+    eventParts.push(`
+        SELECT ${groupF} AS periodo,
+               IF(${groupFirst} = ${groupF}, '${SEG_FIRST}', '${SEG_RE}') AS etapa,
+               CAST(f.nid AS STRING) AS cid
+        FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+        JOIN seg_first sf ON sf.nid = CAST(f.nid AS STRING)
+        LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
+        LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+        WHERE ${where}
+          AND f.valor = 'pre-comité validado'`);
+  }
+
   const eventsSql = eventParts.join('\n        UNION ALL\n');
 
+  const segCte = useSeg
+    ? `,
+    seg_first AS (
+      SELECT CAST(f.nid AS STRING) AS nid, MIN(DATE(f.fecha)) AS first_d
+      FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+      LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
+      LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      WHERE ${whereFirst}
+        AND f.valor = 'pre-comité validado'
+      GROUP BY 1
+    )`
+    : '';
+
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    WITH comerciales AS (${_comercialesUnnest()})${segCte},
     events AS (${eventsSql})
     SELECT
       periodo,
