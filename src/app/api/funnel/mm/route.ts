@@ -695,13 +695,17 @@ async function handleConvTime(params: URLSearchParams) {
     )`
     : '';
 
+  // Columnas por cada etapa del numerador (para dibujar una línea por etapa cuando hay 2+)
+  const numCols = num.map((e, i) => `COUNT(DISTINCT IF(etapa = '${e.replace(/'/g, "''")}', cid, NULL)) AS num_${i}`).join(',\n      ');
+
   const sql = `
     WITH comerciales AS (${_comercialesUnnest()})${segCte},
     events AS (${eventsSql})
     SELECT
       periodo,
       COUNT(DISTINCT IF(etapa IN (${_quoteList(num)}), cid, NULL)) AS num,
-      COUNT(DISTINCT IF(etapa IN (${_quoteList(den)}), cid, NULL)) AS den
+      COUNT(DISTINCT IF(etapa IN (${_quoteList(den)}), cid, NULL)) AS den,
+      ${numCols}
     FROM events
     WHERE periodo IS NOT NULL
     GROUP BY 1
@@ -716,6 +720,14 @@ async function handleConvTime(params: URLSearchParams) {
   const totalN = nums.reduce((a, b) => a + b, 0);
   const totalD = dens.reduce((a, b) => a + b, 0);
 
+  // Una serie por etapa del numerador: su volumen y su CVR (÷ denominador sumado)
+  const numSeries = num.map((etapa, i) => {
+    const vals = rows.map(r => Number(r[`num_${i}`] ?? 0));
+    const cvr = vals.map((v, k) => (dens[k] > 0 ? (v / dens[k]) * 100 : null));
+    const tot = vals.reduce((a, b) => a + b, 0);
+    return { etapa, num: vals, cvr, total_num: tot, total_cvr: totalD > 0 ? (tot / totalD) * 100 : null };
+  });
+
   return NextResponse.json({
     labels,
     num: nums,
@@ -726,6 +738,7 @@ async function handleConvTime(params: URLSearchParams) {
     total_cvr: totalD > 0 ? (totalN / totalD) * 100 : null,
     num_etapas: num,
     den_etapas: den,
+    num_series: numSeries,
   });
 }
 

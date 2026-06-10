@@ -788,25 +788,58 @@ function funnelMM() {
     // ── Render: Conversion in time (line + bars dual-axis) ────────────────
     renderConvTime(data) {
       const t = chartTheme();
-      // Update totals chip
       const fmt = n => n.toLocaleString("es-CO");
       const totalsEl = document.getElementById("conv-totals");
-      const totalCvr = data.total_cvr == null ? "—" : data.total_cvr.toFixed(2) + "%";
-      totalsEl.innerHTML = `Total: <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_num)}</strong> / <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_den)}</strong> = <strong class="text-brand-600 dark:text-brand-400">${totalCvr}</strong>`;
+      const series = data.num_series || [];
+      const multi = series.length > 1;
+      const PAL = ["#7c3aed", "#10b981", "#f59e0b", "#ef4444", "#0ea5e9", "#ec4899"];
+
+      // Chip de totales
+      if (totalsEl) {
+        if (multi) {
+          totalsEl.innerHTML = series.map((s, i) =>
+            `<span style="color:${PAL[i % PAL.length]}"><strong>${s.etapa}</strong>: ${fmt(s.total_num)}/${fmt(data.total_den)} = ${s.total_cvr == null ? "—" : s.total_cvr.toFixed(2) + "%"}</span>`
+          ).join(" &nbsp;·&nbsp; ");
+        } else {
+          const totalCvr = data.total_cvr == null ? "—" : data.total_cvr.toFixed(2) + "%";
+          totalsEl.innerHTML = `Total: <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_num)}</strong> / <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_den)}</strong> = <strong class="text-brand-600 dark:text-brand-400">${totalCvr}</strong>`;
+        }
+      }
 
       const elCT = document.getElementById("chart-conv-time");
       if (!elCT) return;
 
-      // Patrón update-or-create: si ya existe un chart en este canvas,
-      // actualizamos su data en vez de recrear (evita race conditions de
-      // ResizeObserver de Chart.js que producen "null.save").
+      // Datasets: 2+ etapas en numerador -> una línea CVR por etapa (comparar, no sumar).
+      let datasets;
+      if (multi) {
+        datasets = series.map((s, i) => ({
+          label: s.etapa, type: "line", yAxisID: "y1", data: s.cvr,
+          borderColor: PAL[i % PAL.length], backgroundColor: "transparent",
+          fill: false, tension: 0.25, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, order: i,
+        }));
+        datasets.push({
+          label: "Denominador", type: "bar", yAxisID: "y2", data: data.den,
+          backgroundColor: "rgba(148,163,184,0.20)", borderWidth: 0, borderRadius: 3, order: 99,
+        });
+      } else {
+        datasets = [
+          { label: "CVR %", type: "line", yAxisID: "y1", data: data.cvr, borderColor: "#7c3aed", backgroundColor: "rgba(124,58,237,0.12)", fill: true, tension: 0.25, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, order: 0 },
+          { label: "Numerador", type: "bar", yAxisID: "y2", data: data.num, backgroundColor: "rgba(16,185,129,0.55)", borderWidth: 0, borderRadius: 3, order: 2 },
+          { label: "Denominador", type: "bar", yAxisID: "y2", data: data.den, backgroundColor: "rgba(148,163,184,0.30)", borderWidth: 0, borderRadius: 3, order: 3 },
+        ];
+      }
+
+      // Update-or-create: solo actualiza si coincide el número de datasets; si no, recrea.
       const existing = Chart.getChart(elCT);
-      if (existing) {
+      if (existing && existing.data.datasets.length === datasets.length) {
         try {
           existing.data.labels = data.labels;
-          existing.data.datasets[0].data = data.cvr;
-          existing.data.datasets[1].data = data.num;
-          existing.data.datasets[2].data = data.den;
+          datasets.forEach((ds, i) => {
+            existing.data.datasets[i].data = ds.data;
+            existing.data.datasets[i].label = ds.label;
+            existing.data.datasets[i].borderColor = ds.borderColor;
+            existing.data.datasets[i].backgroundColor = ds.backgroundColor;
+          });
           existing.update("none");
           this.chartConvTime = existing;
           return;
@@ -814,37 +847,22 @@ function funnelMM() {
           console.error("renderConvTime update failed, recreating", e);
           existing.destroy();
         }
+      } else if (existing) {
+        existing.destroy();
       }
 
       const ctx = elCT.getContext("2d");
       if (!ctx) return;
       try { this.chartConvTime = new Chart(ctx, {
         type: "line",
-        data: {
-          labels: data.labels,
-          datasets: [
-            {
-              label: "CVR %", type: "line", yAxisID: "y1", data: data.cvr,
-              borderColor: "#7c3aed", backgroundColor: "rgba(124,58,237,0.12)",
-              fill: true, tension: 0.25, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, order: 0,
-            },
-            {
-              label: "Numerador", type: "bar", yAxisID: "y2", data: data.num,
-              backgroundColor: "rgba(16,185,129,0.55)", borderWidth: 0, borderRadius: 3, order: 2,
-            },
-            {
-              label: "Denominador", type: "bar", yAxisID: "y2", data: data.den,
-              backgroundColor: "rgba(148,163,184,0.30)", borderWidth: 0, borderRadius: 3, order: 3,
-            }
-          ]
-        },
+        data: { labels: data.labels, datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: "index", intersect: false },
           plugins: {
             legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "rect", padding: 14, font: { size: 11 }, color: t.text } },
             tooltip: { callbacks: { label: c => {
-              if (c.dataset.label === "CVR %") return ` CVR: ${c.parsed.y == null ? "—" : c.parsed.y.toFixed(2)+"%"}`;
+              if (c.dataset.yAxisID === "y1") return ` ${c.dataset.label}: ${c.parsed.y == null ? "—" : c.parsed.y.toFixed(2)+"%"}`;
               return ` ${c.dataset.label}: ${c.parsed.y.toLocaleString("es-CO")}`;
             } } }
           },
