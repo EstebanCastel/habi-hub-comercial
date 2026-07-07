@@ -6,7 +6,7 @@
 {% macro ms(name, label, all_label="Todos") %}
 <div class="flex flex-col gap-1 min-w-0">
   <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
-  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','cat_com':'cats_com','cat':'cats','fuente':'fuentes','area':'areas','recurrencia':'recurrencias'}[name] }}, () => refresh())"
+  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','cat_com':'cats_com','cat':'cats','fuente':'fuentes','area':'areas','recurrencia':'recurrencias','motivo':'motivos'}[name] }}, () => refresh())"
        class="relative" @click.outside="open=false">
     <button type="button" @click="open = !open"
       class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
@@ -34,6 +34,96 @@
       <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
     </div>
   </div>
+</div>
+{% endmacro %}
+
+{# Macro: multi-select global CON buscador interno (para listas largas, ej. campañas) #}
+{% macro ms_search(name, label, opts_attr, all_label="Todas") %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ opts_attr }} || [], () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-80 max-w-[90vw] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <div class="px-2 pb-1 sticky top-0 bg-white dark:bg-slate-800">
+        <input type="text" x-model="filter" @click.stop placeholder="buscar {{ label|lower }}…"
+          class="w-full px-2 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+      </div>
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        ({{ all_label }})
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in filteredOptions()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt" class="font-mono break-all"></span>
+        </label>
+      </template>
+      <div x-show="filteredOptions().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# Macro: un multi-select para un panel de cohorte (opciones explícitas) #}
+{% macro cohort_ms(c, key, label, opts, all_label="Todos") %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('cmp{{ c }}_{{ key }}', () => filtersOptions.{{ opts }} || [], () => refreshCompare('{{ c }}'))" class="relative" @click.outside="open=false">
+    <button type="button" @click="open=!open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">({{ all_label }})
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# Macro: panel de cohorte para la comparación de funnels (A / B) #}
+{% macro cohort_panel(c, title, dot) %}
+<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+  <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+    <span class="w-2.5 h-2.5 rounded-full" style="background:{{ dot }}"></span>{{ title }}
+  </h2>
+  <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 mt-3">
+    <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+      <select x-model="mes{{ c }}" @change="refreshCompare('{{ c }}')"
+        class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+        <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+      </select>
+    </div>
+    {{ cohort_ms(c, 'equipo',  'Equipo',         'equipos') }}
+    {{ cohort_ms(c, 'cat',     'Categoría',      'cats', 'Todas') }}
+    {{ cohort_ms(c, 'fuente',  'Fuente',         'fuentes', 'Todas') }}
+    {{ cohort_ms(c, 'motivo',  'Razón de venta', 'motivos', 'Todas') }}
+  </div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mt-4 mb-2" id="funnelHdr{{ c }}">—</div>
+  <div id="funnel{{ c }}" class="space-y-2"></div>
 </div>
 {% endmacro %}
 
@@ -82,6 +172,8 @@
       {{ ms('cat', 'Categoría', 'Todas') }}
       {{ ms('fuente', 'Fuente', 'Todas') }}
       {{ ms('area', 'Área') }}
+      {{ ms('motivo', 'Razón de venta', 'Todas') }}
+      {{ ms_search('campaign', 'Campaña (utm)', 'campaigns') }}
 
       <div class="flex flex-col gap-1 min-w-0">
         <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
@@ -216,6 +308,36 @@
     </div>
   </div>
 
+  <!-- Share razón de venta (donut + bars stacked) -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-3">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Share de razón de venta</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Distribución por motivo de venta (categorizado) de los inmuebles en <em>Primer asignación</em></p>
+      </div>
+      <!-- Toggle excluir sin dato -->
+      <label class="inline-flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-300 select-none">
+        <input type="checkbox" class="accent-brand-600" x-model="shareMotivoExcluirSin" @change="$nextTick(() => renderShareMotivo(lastShareMotivoData))">
+        <span>Excluir <em>Sin dato</em></span>
+      </label>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 md:gap-6 items-start">
+      <!-- Donut + leyenda -->
+      <div>
+        <div class="relative h-[160px]"><canvas id="chart-motivo-donut"></canvas></div>
+        <div id="motivo-legend" class="mt-3 space-y-1.5 text-sm"></div>
+      </div>
+      <!-- Stacked bars por período -->
+      <div class="relative h-[280px]">
+        <canvas id="chart-motivo-bars"></canvas>
+        <div x-show="loading.shareMotivo" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+          <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Tasa de conversión en el tiempo -->
   <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
     <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
@@ -269,8 +391,9 @@
       </div>
     </div>
 
-    {# Macro local: 1 multi-select compacto para la card de conversión #}
-    {% macro conv_ms(key, label, options_attr) %}
+    {# Macro local: 1 multi-select compacto para la card de conversión.
+       searchable=True agrega un buscador interno (para listas largas, ej. campañas). #}
+    {% macro conv_ms(key, label, options_attr, searchable=False) %}
     <div class="flex flex-col gap-1 min-w-0">
       <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
       <div x-data="multiSelect('{{ key }}', () => filtersOptions.{{ options_attr }} || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
@@ -280,14 +403,20 @@
           <span x-text="btnLabel()" class="truncate"></span>
           <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
         </button>
-        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-64 py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
-          <template x-for="opt in options()" :key="opt">
+        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 {{ 'w-80' if searchable else 'w-64' }} py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+          {% if searchable %}
+          <div class="px-2 pb-1 sticky top-0 bg-white dark:bg-slate-800">
+            <input type="text" x-model="filter" @click.stop placeholder="buscar {{ label|lower }}…"
+              class="w-full px-2 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+          </div>
+          {% endif %}
+          <template x-for="opt in {{ 'filteredOptions()' if searchable else 'options()' }}" :key="opt">
             <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
               <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
-              <span x-text="opt"></span>
+              <span x-text="opt" class="{{ 'font-mono break-all' if searchable else '' }}"></span>
             </label>
           </template>
-          <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+          <div x-show="{{ 'filteredOptions()' if searchable else 'options()' }}.length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
         </div>
       </div>
     </div>
@@ -296,11 +425,12 @@
     <!-- Filtros locales (sólo esta sección · sobrescriben los globales) -->
     <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4">
       <p class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500 mb-2">Filtros locales · sobrescriben los globales sólo en esta sección</p>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {{ conv_ms('convTimeFuente',      'Fuente',               'fuentes') }}
         {{ conv_ms('convTimeEquipo',      'Equipo',               'equipos') }}
         {{ conv_ms('convTimePrioridadMM', 'Prioridad de gestión', 'prioridades_mm') }}
         {{ conv_ms('convTimeArea',        'Área',                 'areas') }}
+        {{ conv_ms('convTimeCampaign',    'Campaña (utm)',        'campaigns', searchable=True) }}
       </div>
     </div>
 
@@ -361,6 +491,7 @@
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Categoría</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Fuente</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Área</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Razón de venta</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Asig.</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Cita</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Visita</th>
@@ -371,7 +502,7 @@
           </tr>
         </thead>
         <tbody id="negocios-tbody" class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-          <tr><td colspan="13" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
+          <tr><td colspan="14" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
         </tbody>
       </table>
       <div x-show="loading.negocios" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
@@ -598,6 +729,16 @@
       <div id="cosechas-empty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
     </div>
 
+    <!-- Comparación de funnels (cohorte A vs B) -->
+    <div>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-1">Comparar funnels</h2>
+      <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">Cohorte = nids cuya 1ª asignación cae en el mes elegido; cada etapa = cuántos de esos la alcanzaron (después de la asignación). Cada lado tiene filtros independientes.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {{ cohort_panel('A', 'Cohorte A', '#2563eb') }}
+        {{ cohort_panel('B', 'Cohorte B', '#059669') }}
+      </div>
+    </div>
+
   </div><!-- /tab cosechas -->
 
   <!-- ─────────── TAB: PRECIOS + SUBSIDIOS ─────────── -->
@@ -743,5 +884,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/funnel_mm.js?v=10"></script>
+<script src="/static/js/funnel_mm.js?v=11"></script>
 {% endblock %}

@@ -37,13 +37,18 @@ from webapp.routers.funnel_inmo import (
     STAGE_ID_ACEPTADA,
     STAGE_ID_CAPTADO,
 )
-from webapp.routers.funnel_mm import EXCLUDE_ETAPAS
+from webapp.routers.funnel_mm import EXCLUDE_ETAPAS, _motivo_cte, MOTIVO_CATEGORIAS, MOTIVO_SIN
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 FECHA_INICIO = "2026-01-01"
+
+# BNPL: campo de hubspot.deals (solo CO). Valores reales: 'Sí' / 'No' (+ vacío).
+BNPL_FIELD = "negocio_aplica_para_bnpl_"
+BNPL_SIN = "Sin dato"
+BNPL_OPCIONES = ["Sí", "No"]
 
 # ── Etapas upstream (pre-asignación, comunes a ambos productos) ─────────────
 # Fuente: papyrus-data.habi_wh_bi.tabla_inmuebles_general (1 fila por nid)
@@ -83,6 +88,9 @@ COMBOS: dict[str, dict] = {
     "combo:aceptados":         {"label": "Aceptó + Oferta aceptada",   "expand": ["mm:acepto", "inmo:oferta_aceptada"]},
     "combo:transacciones":     {"label": "Transacciones (Cierre + Capta)", "expand": ["mm:cierre", "inmo:captado"]},
 }
+
+# Secuencia ordenada del funnel combinado (vista funnel / comparación cohortes).
+COMBO_FUNNEL = ["combo:asignados", "combo:visitas_perfilados", "combo:aprobados", "combo:aceptados", "combo:transacciones"]
 
 # Default num/den
 DEFAULT_NUM = "combo:transacciones"
@@ -280,10 +288,14 @@ def _events_ctes(
         )"""]
         unions = []
         if "inmo:asignados" in needed_inmo:
-            unions.append("""
-              SELECT nid, fecha, 'inmo:asignados' AS etapa
-              FROM historical_inmo
-              QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY fecha ASC) = 1
+            # Fuente OFICIAL de asignados Inmo: leads_asignados_inmobiliaria_colombia
+            # (1 fila por nid = primera asignación). Reemplaza el "primer evento en historical".
+            # ⚠️ La tabla arranca en 2025-12-01.
+            unions.append(f"""
+              SELECT nid, TIMESTAMP(fecha_primera_asignacion) AS fecha, 'inmo:asignados' AS etapa
+              FROM `sellers-main-prod.data_sellers_bo.leads_asignados_inmobiliaria_colombia`
+              WHERE DATE(fecha_primera_asignacion) >= '{fecha_desde}'
+                AND DATE(fecha_primera_asignacion) <= '{fecha_hasta}'
             """)
         for key, stage_id in stage_map.items():
             if key in needed_inmo:
@@ -371,13 +383,17 @@ def filters_options(
     WITH comerciales AS ({_comerciales_unnest()}),{ctes}
     SELECT
       ARRAY(SELECT DISTINCT equipo FROM events WHERE equipo NOT IN ('', 'Sin equipo') ORDER BY equipo) AS equipos,
-      ARRAY(SELECT DISTINCT area   FROM events WHERE area   != '' ORDER BY area)                       AS areas
+      ARRAY(SELECT DISTINCT area   FROM events WHERE area   != '' ORDER BY area)                       AS areas,
+      ARRAY(SELECT DISTINCT FORMAT_DATE('%Y-%m', fecha) FROM events ORDER BY 1 DESC)                   AS meses
     """
     rows = bq.query(sql)
     r = rows[0] if rows else {}
     return JSONResponse({
         "equipos": sorted([x for x in (r.get("equipos") or []) if x]),
         "areas":   sorted([x for x in (r.get("areas")   or []) if x]),
+        "motivos": [c["key"] for c in MOTIVO_CATEGORIAS] + [MOTIVO_SIN],
+        "meses":   [m for m in (r.get("meses") or []) if m],
+        "bnpl":    BNPL_OPCIONES + [BNPL_SIN],
     })
 
 
@@ -419,12 +435,13 @@ def conv_time(
     den: Annotated[str, Query()] = DEFAULT_DEN,
     equipo: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    bnpl: Annotated[list[str] | None, Query()] = None,
     exclude_incidente: Annotated[bool, Query()] = True,
 ):
     """CVR por período: nids(num) ÷ nids(den) sobre el universo MM + Inmo.
 
-    Conteo: COUNT(DISTINCT (source, nid)) — un nid presente en MM y en Inmo
-    cuenta una vez por producto (matchea la intuición "asignados MM + asignados Inmo").
+    Conteo: COUNT(DISTINCT nid) — nid único (un negocio en MM y en Inmo cuenta 1 vez).
     """
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
@@ -444,13 +461,20 @@ def conv_time(
     where = _filter_clause(equipo, area)
     group_expr = _group_expr(granularidad, "e.fecha")
 
+    # Filtros por nid vía join a deals/recepcionista, solo si están activos.
+    m_cte, m_join, m_cond = _motivo_extra(motivo)
+    b_cte, b_join, b_cond = _bnpl_extra(bnpl)
+    where += m_cond + b_cond
+
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()}),{ctes}
+    WITH comerciales AS ({_comerciales_unnest()}),{ctes}{m_cte}{b_cte}
     SELECT
       {group_expr} AS periodo,
-      COUNT(DISTINCT IF(e.etapa IN ({_quote_list(num_keys)}), CONCAT(e.source, ':', e.nid), NULL)) AS num,
-      COUNT(DISTINCT IF(e.etapa IN ({_quote_list(den_keys)}), CONCAT(e.source, ':', e.nid), NULL)) AS den
+      COUNT(DISTINCT IF(e.etapa IN ({_quote_list(num_keys)}), e.nid, NULL)) AS num,
+      COUNT(DISTINCT IF(e.etapa IN ({_quote_list(den_keys)}), e.nid, NULL)) AS den
     FROM events e
+    {m_join}
+    {b_join}
     WHERE {where}
     GROUP BY 1
     ORDER BY 1
@@ -481,3 +505,248 @@ def conv_time(
         "den_key": den, "den_label": _resolve_label(den),
         "num_expanded": num_keys, "den_expanded": den_keys,
     })
+
+
+def _label_for(key: str) -> str:
+    if key in COMBOS:
+        return COMBOS[key]["label"]
+    for e in MM_ETAPAS + INMO_ETAPAS + UPSTREAM_ETAPAS:
+        if e["key"] == key:
+            return e["label"]
+    return key
+
+
+def _motivo_extra(motivo: list[str] | None) -> tuple[str, str, str]:
+    """(cte, join, cond) para filtrar por razón de venta (recepcionista MM). Vacíos si no hay filtro."""
+    if not motivo:
+        return "", "", ""
+    cte = f",\n    motivo AS ({_motivo_cte()})"
+    join = "LEFT JOIN motivo m ON CAST(m.nid AS STRING) = e.nid"
+    cond = f"\n  AND COALESCE(m.motivo_cat, '{MOTIVO_SIN}') IN ({_quote_list(motivo)})"
+    return cte, join, cond
+
+
+def _bnpl_extra(bnpl: list[str] | None) -> tuple[str, str, str]:
+    """(cte, join, cond) para filtrar por 'aplica para BNPL' (hubspot.deals, solo CO)."""
+    if not bnpl:
+        return "", "", ""
+    cte = (",\n    bnpl_deals AS ("
+           f"SELECT CAST(nid AS STRING) AS nid, {BNPL_FIELD} AS bnpl "
+           "FROM `sellers-main-prod.hubspot.deals` "
+           "QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY nid) = 1)")
+    join = "LEFT JOIN bnpl_deals bn ON bn.nid = e.nid"
+    cond = f"\n  AND COALESCE(NULLIF(bn.bnpl, ''), '{BNPL_SIN}') IN ({_quote_list(bnpl)})"
+    return cte, join, cond
+
+
+# ── /cosechas → cohorte × offset (entidad = source:nid) ──────────────────────
+@router.get("/cosechas")
+def cosechas(
+    origen: Annotated[str, Query()] = "combo:asignados",
+    destino: Annotated[str, Query()] = "combo:transacciones",
+    granularidad: Annotated[str, Query()] = "mes",
+    bucket: Annotated[str, Query()] = "iso",
+    conteo: Annotated[str, Query()] = "cohorte",
+    fecha_desde: Annotated[str, Query()] = FECHA_INICIO,
+    fecha_hasta: Annotated[str | None, Query()] = None,
+    equipo: Annotated[list[str] | None, Query()] = None,
+    area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    bnpl: Annotated[list[str] | None, Query()] = None,
+    exclude_incidente: Annotated[bool, Query()] = True,
+):
+    if not fecha_hasta:
+        fecha_hasta = date.today().isoformat()
+    origen_keys = _expand_keys([origen])
+    destino_keys = _expand_keys([destino])
+    if not origen_keys or not destino_keys:
+        return JSONResponse({"error": "origen/destino inválidos"}, status_code=400)
+    needed = set(origen_keys) | set(destino_keys)
+    needed_mm = [k for k in needed if k.startswith("mm:")]
+    needed_inmo = [k for k in needed if k.startswith("inmo:")]
+    needed_upstream = [k for k in needed if k in UPSTREAM_KEYS]
+    ctes = _events_ctes(FECHA_INICIO, date.today().isoformat(), needed_mm, needed_inmo,
+                        needed_upstream=needed_upstream, exclude_incidente=exclude_incidente)
+
+    unit = "WEEK(MONDAY)" if granularidad == "semana" else "MONTH"
+    fmt = "'%Y-%m-%d'" if granularidad == "semana" else "'%Y-%m'"
+    if bucket == "dias":
+        dpb = 7 if granularidad == "semana" else 30
+        offset_expr = f"DIV(DATE_DIFF(d.fecha_destino, o.fecha_origen, DAY), {dpb})"
+    else:
+        diff_unit = "WEEK" if granularidad == "semana" else "MONTH"
+        offset_expr = f"DATE_DIFF(d.fecha_destino, o.fecha_origen, {diff_unit})"
+
+    where_o = _filter_clause(equipo, area)
+    m_cte, m_join, m_cond = _motivo_extra(motivo)
+    b_cte, b_join, b_cond = _bnpl_extra(bnpl)
+    where_o += m_cond + b_cond
+    ent = "e.nid"
+
+    if conteo == "funnel":
+        origen_cte = f"""
+        origen AS (
+          SELECT {ent} AS entity, DATE_TRUNC(e.fecha, {unit}) AS cohorte_date, MIN(e.fecha) AS fecha_origen
+          FROM events e {m_join} {b_join}
+          WHERE e.etapa IN ({_quote_list(origen_keys)}) AND {where_o}
+            AND e.fecha BETWEEN '{fecha_desde}' AND '{fecha_hasta}'
+          GROUP BY 1, 2
+        )"""
+        cohorte_expr = f"FORMAT_DATE({fmt}, o.cohorte_date)"
+    else:
+        origen_cte = f"""
+        origen AS (
+          SELECT {ent} AS entity, MIN(e.fecha) AS fecha_origen
+          FROM events e {m_join} {b_join}
+          WHERE e.etapa IN ({_quote_list(origen_keys)}) AND {where_o}
+            AND e.fecha BETWEEN '{fecha_desde}' AND '{fecha_hasta}'
+          GROUP BY 1
+        )"""
+        cohorte_expr = f"FORMAT_DATE({fmt}, DATE_TRUNC(o.fecha_origen, {unit}))"
+
+    sql = f"""
+    WITH comerciales AS ({_comerciales_unnest()}),{ctes}{m_cte}{b_cte},
+    {origen_cte},
+    destino AS (
+      SELECT nid AS entity, MIN(fecha) AS fecha_destino
+      FROM events WHERE etapa IN ({_quote_list(destino_keys)}) GROUP BY 1
+    ),
+    joined AS (
+      SELECT {cohorte_expr} AS cohorte, {offset_expr} AS offset_unit
+      FROM origen o LEFT JOIN destino d ON d.entity = o.entity AND d.fecha_destino >= o.fecha_origen
+    )
+    SELECT cohorte, offset_unit, COUNT(*) AS n FROM joined WHERE cohorte IS NOT NULL GROUP BY 1, 2 ORDER BY 1, 2
+    """
+    rows = bq.query(sql)
+    cohortes: dict[str, dict[int | None, int]] = {}
+    for r in rows:
+        cohortes.setdefault(r["cohorte"], {})[r["offset_unit"]] = int(r["n"])
+
+    cohortes_ordered = sorted(cohortes.keys())
+    max_offset = 0
+    for v in cohortes.values():
+        for o in v.keys():
+            if o is not None and o > max_offset:
+                max_offset = o
+
+    matrix = []
+    for c in cohortes_ordered:
+        b = cohortes[c]
+        total = sum(b.values())
+        counts = [b.get(o, 0) for o in range(max_offset + 1)]
+        no_reached = b.get(None, 0)
+        alc = total - no_reached
+        cum, cum_counts = 0, []
+        for x in counts:
+            cum += x
+            cum_counts.append(cum)
+        matrix.append({
+            "cohorte": c, "total": total, "alcanzaron": alc, "no_alcanzaron": no_reached,
+            "counts": counts,
+            "pct": [(x / total * 100) if total > 0 else 0 for x in counts],
+            "share": [(x / alc * 100) if alc > 0 else 0 for x in counts],
+            "cum_counts": cum_counts,
+            "cum_pct": [(x / total * 100) if total > 0 else 0 for x in cum_counts],
+            "cum_share": [(x / alc * 100) if alc > 0 else 0 for x in cum_counts],
+        })
+
+    prefix = "S" if granularidad == "semana" else "M"
+    offset_labels = [f"{prefix}{i}" for i in range(max_offset + 1)]
+    if bucket == "dias":
+        step = 7 if granularidad == "semana" else 30
+        offset_ranges = [f"{i*step}-{(i+1)*step-1}d" for i in range(max_offset + 1)]
+    else:
+        offset_ranges = None
+
+    return JSONResponse({
+        "origen": origen, "destino": destino, "origen_label": _label_for(origen), "destino_label": _label_for(destino),
+        "granularidad": granularidad, "bucket": bucket, "conteo": conteo,
+        "offset_labels": offset_labels, "offset_ranges": offset_ranges, "rows": matrix,
+    })
+
+
+# ── /funnel-compare → funnel cohortado combinado (A vs B) ────────────────────
+@router.get("/funnel-compare")
+def funnel_compare(
+    mes: Annotated[str | None, Query()] = None,
+    equipo: Annotated[list[str] | None, Query()] = None,
+    area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    bnpl: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[str, Query()] = "both",   # both | mm | inmo (acota el producto)
+    exclude_incidente: Annotated[bool, Query()] = True,
+):
+    label = mes if mes else "Todo"
+    source_filter = f"AND e.source = '{source}'" if source in ("mm", "inmo") else ""
+    all_keys = []
+    for combo in COMBO_FUNNEL:
+        all_keys.extend(_expand_keys([combo]))
+    needed_mm = [k for k in set(all_keys) if k.startswith("mm:")]
+    needed_inmo = [k for k in set(all_keys) if k.startswith("inmo:")]
+    ctes = _events_ctes(FECHA_INICIO, date.today().isoformat(), needed_mm, needed_inmo,
+                        needed_upstream=[], exclude_incidente=exclude_incidente)
+
+    where = _filter_clause(equipo, area)
+    m_cte, m_join, m_cond = _motivo_extra(motivo)
+    b_cte, b_join, b_cond = _bnpl_extra(bnpl)
+    where += m_cond + b_cond
+    cohort_where = f"AND FORMAT_DATE('%Y-%m', fecha_origen) = '{mes}'" if mes else ""
+    asig_keys = _expand_keys([COMBO_FUNNEL[0]])
+    ent = "e.nid"
+    _MM_BY_KEY = {e["key"]: e for e in MM_ETAPAS}
+    _INMO_BY_KEY = {e["key"]: e for e in INMO_ETAPAS}
+
+    when_lines = []
+    for combo in COMBO_FUNNEL:
+        for k in _expand_keys([combo]):
+            when_lines.append(f"WHEN '{k}' THEN '{combo}'")
+    combo_case = f"CASE e.etapa {' '.join(when_lines)} ELSE NULL END"
+
+    sql = f"""
+    WITH comerciales AS ({_comerciales_unnest()}),{ctes}{m_cte}{b_cte},
+    asig AS (
+      SELECT {ent} AS entity, MIN(e.fecha) AS fecha_origen
+      FROM events e {m_join} {b_join}
+      WHERE e.etapa IN ({_quote_list(asig_keys)}) AND {where} {source_filter}
+      GROUP BY 1
+    ),
+    cohort AS (SELECT entity, fecha_origen FROM asig WHERE TRUE {cohort_where}),
+    stage_min AS (
+      SELECT e.nid AS entity, {combo_case} AS combo, MIN(e.fecha) AS fecha_etapa
+      FROM events e
+      WHERE {combo_case} IS NOT NULL {source_filter}
+      GROUP BY 1, 2
+    ),
+    reached AS (
+      SELECT sm.combo AS etapa, COUNT(DISTINCT sm.entity) AS nids
+      FROM stage_min sm JOIN cohort co ON co.entity = sm.entity
+      WHERE sm.fecha_etapa >= co.fecha_origen
+      GROUP BY 1
+    )
+    SELECT etapa, nids FROM reached
+    """
+    rows = bq.query(sql)
+    by_combo = {r["etapa"]: int(r["nids"]) for r in rows}
+
+    def _stage_label(combo: str) -> str:
+        if source in ("mm", "inmo"):
+            for k in COMBOS[combo]["expand"]:
+                if k.startswith(source + ":"):
+                    e = (_MM_BY_KEY if source == "mm" else _INMO_BY_KEY).get(k)
+                    if e:
+                        return e["label"]
+        return COMBOS[combo]["label"]
+
+    first = by_combo.get(COMBO_FUNNEL[0], 0)
+    stages, prev_n = [], None
+    for combo in COMBO_FUNNEL:
+        n = by_combo.get(combo, 0)
+        stages.append({
+            "key": combo, "label": _stage_label(combo), "exclusion": False,
+            "nids": n,
+            "pct_first": (n / first * 100) if first > 0 else 0,
+            "pct_prev": (n / prev_n * 100) if (prev_n and prev_n > 0) else None,
+        })
+        prev_n = n
+
+    return JSONResponse({"mes": label, "total": first, "stages": stages})

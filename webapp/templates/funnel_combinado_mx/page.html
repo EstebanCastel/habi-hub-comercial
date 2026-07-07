@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% block title %}Funnel Combinado México · {{ app_name }}{% endblock %}
+
+{% macro ms(key, label, options_expr, on_change) %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('{{ key }}', () => {{ options_expr }}, () => {{ on_change }})" class="relative" @click.outside="open=false">
+    <button type="button" @click="open=!open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# Macro: panel de cohorte para la comparación de funnels (A / B) #}
+{% macro cohort_panel(c, title, dot) %}
+<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+  <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+    <span class="w-2.5 h-2.5 rounded-full" style="background:{{ dot }}"></span>{{ title }}
+  </h2>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3">
+    <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+      <select x-model="mes{{ c }}" @change="refreshCompare('{{ c }}')"
+        class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+        <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+      </select>
+    </div>
+    {{ ms('cmp' ~ c ~ '_equipo', 'Equipo', 'filtersOptions.equipos || []', "refreshCompare('" ~ c ~ "')") }}
+    {{ ms('cmp' ~ c ~ '_area',   'Área',   'filtersOptions.areas || []',   "refreshCompare('" ~ c ~ "')") }}
+    {{ ms('cmp' ~ c ~ '_motivo', 'Razón de venta', 'filtersOptions.motivos || []', "refreshCompare('" ~ c ~ "')") }}
+  </div>
+  <div class="flex flex-col gap-1 mt-2">
+    <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Asignados</span>
+    <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-xs w-fit">
+      <template x-for="o in [['both','MM + Inmo'],['mm','MM'],['inmo','Inmo']]" :key="o[0]">
+        <button @click="source{{ c }}=o[0]; refreshCompare('{{ c }}')" x-text="o[1]"
+          :class="source{{ c }}===o[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="px-3 py-1.5"></button>
+      </template>
+    </div>
+  </div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mt-3 mb-2" id="funnelHdr{{ c }}">—</div>
+  <div id="funnel{{ c }}" class="space-y-2"></div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div x-data="comboMx()" x-init="init()" class="space-y-5">
+
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100">Funnel Combinado · México 🇲🇽</h1>
+      <p class="text-sm text-slate-500 dark:text-slate-400">CVR unificado MM + Inmo — elige numerador y denominador entre ambos productos</p>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {{ ms('equipo', 'Equipo', 'filtersOptions.equipos || []', 'refresh()') }}
+      {{ ms('area',   'Área',   'filtersOptions.areas || []',   'refresh()') }}
+      {{ ms('motivo', 'Razón de venta', 'filtersOptions.motivos || []', 'refresh()') }}
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
+        <input type="date" x-model="fechaDesde" @change="refresh()" class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Hasta</label>
+        <input type="date" x-model="fechaHasta" @change="refresh()" class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+        <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+          <template x-for="g in [['mes','Mes'],['semana','Sem'],['mes_com','Mes c.'],['sem_com','Sem c.']]" :key="g[0]">
+            <button @click="granularidad=g[0]; refresh()" :class="granularidad===g[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'" class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="g[1]"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button @click="resetFiltros()" class="text-xs md:text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition">Limpiar filtros</button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['cvr','Conversión'],['cosechas','Cosechas']]" :key="t[0]">
+        <button @click="switchTab(t[0])"
+          :class="tab===t[0] ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- ─────────── TAB: CVR ─────────── -->
+  <div x-show="tab==='cvr'" class="space-y-5">
+
+  <!-- CVR -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Tasa de conversión combinada</h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">CVR = suma(<em>Numerador</em>) ÷ suma(<em>Denominador</em>) · MM + Inmo</p>
+      </div>
+      <span id="convTotals" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:max-w-lg gap-3 mb-3">
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Numerador
+        <select x-model="num" @change="reload()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-2 font-normal normal-case tracking-normal" x-ref="numSel"></select>
+      </label>
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Denominador
+        <select x-model="den" @change="reload()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-2 font-normal normal-case tracking-normal" x-ref="denSel"></select>
+      </label>
+    </div>
+    <div class="relative h-[340px] md:h-[400px]"><canvas id="chartCombo"></canvas></div>
+  </div>
+
+  </div><!-- /tab cvr -->
+
+  <!-- ─────────── TAB: COSECHAS ─────────── -->
+  <div x-show="tab==='cosechas'" x-cloak class="space-y-5">
+
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cosechas · <span x-text="cosechaTitle" class="text-brand-600 dark:text-brand-400"></span></h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Entidad = nid por producto · % que pasan de origen a destino en N semanas/meses</p>
+      </div>
+      <span class="text-xs text-slate-500 dark:text-slate-400" x-text="cosechaSummary"></span>
+    </div>
+    <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Origen
+        <select x-model="cosechaOrigen" @change="refreshCosechas()" x-ref="cosOrigen" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal"></select>
+      </label>
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Destino
+        <select x-model="cosechaDestino" @change="refreshCosechas()" x-ref="cosDestino" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal"></select>
+      </label>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="g in [['semana','Semana'],['mes','Mes']]" :key="g[0]"><button @click="cosechaGran=g[0]; refreshCosechas()" x-text="g[1]" :class="cosechaGran===g[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Bucket</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="b in [['iso','ISO'],['dias','7d/30d']]" :key="b[0]"><button @click="cosechaBucket=b[0]; refreshCosechas()" x-text="b[1]" :class="cosechaBucket===b[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Conteo</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="m in [['cohorte','Cohorte'],['funnel','Funnel']]" :key="m[0]"><button @click="cosechaConteo=m[0]; refreshCosechas()" x-text="m[1]" :class="cosechaConteo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Modo</span>
+        <div class="flex items-center gap-2">
+          <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs flex-1">
+            <template x-for="m in [['pct','% coh.'],['share','Share'],['abs','Núm.']]" :key="m[0]"><button @click="cosechaModo=m[0]; renderCosechasTable()" x-text="m[1]" :class="cosechaModo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+          </div>
+          <label class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap"><input type="checkbox" x-model="cosechaAcum" @change="renderCosechasTable()" class="accent-brand-600">Acum.</label>
+        </div>
+      </div>
+    </div>
+    <div class="overflow-x-auto"><table class="min-w-full text-xs md:text-sm" id="cosechasTable"></table></div>
+    <div id="cosechasEmpty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+  </div>
+
+  <!-- Comparación de funnels -->
+  <div>
+    <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-1">Comparar funnels</h2>
+    <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">Funnel combinado (MM + Inmo) por etapas presets; cohorte = asignados del mes. Cada lado con filtros independientes.</p>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {{ cohort_panel('A', 'Cohorte A', '#2563eb') }}
+      {{ cohort_panel('B', 'Cohorte B', '#059669') }}
+      {{ cohort_panel('C', 'Cohorte C', '#d97706') }}
+    </div>
+  </div>
+
+  </div><!-- /tab cosechas -->
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("cmx", {
+    equipo: [], area: [], motivo: [],
+    cmpA_equipo: [], cmpA_area: [], cmpA_motivo: [],
+    cmpB_equipo: [], cmpB_area: [], cmpB_motivo: [],
+    cmpC_equipo: [], cmpC_area: [], cmpC_motivo: [],
+  });
+});
+
+function multiSelect(key, getOptionsFn, onChange) {
+  return {
+    key, values: [], open: false,
+    init() { this.values = (Alpine.store("cmx")[this.key] || []).slice(); },
+    options() { return getOptionsFn() || []; },
+    allSelected() { return this.values.length === this.options().length && this.options().length > 0; },
+    _sync() { Alpine.store("cmx")[this.key] = this.values.slice(); onChange && onChange(); },
+    toggle(v) { const i = this.values.indexOf(v); if (i >= 0) this.values.splice(i, 1); else this.values.push(v); this._sync(); },
+    toggleAll(e) { this.values = e.target.checked ? [...this.options()] : []; this._sync(); },
+    btnLabel() { const n = this.values.length, t = this.options().length; if (n === 0 || n === t) return "Todos"; if (n === 1) return this.values[0]; return `${n} seleccionados`; },
+  };
+}
+
+function comboMx() {
+  return {
+    tab: "cvr",
+    fechaDesde: "{{ fecha_desde }}", fechaHasta: "{{ fecha_hasta }}", granularidad: "mes",
+    filtersOptions: {},
+    num: "{{ default_num }}", den: "{{ default_den }}",
+    _groups: [],
+    // cosechas
+    cosechaOrigen: "combo:asignados", cosechaDestino: "combo:transacciones",
+    cosechaGran: "mes", cosechaBucket: "iso", cosechaConteo: "cohorte",
+    cosechaModo: "pct", cosechaAcum: false, cosechaData: null, cosechaTitle: "", cosechaSummary: "",
+    // comparación
+    mesA: "", mesB: "", mesC: "", sourceA: "both", sourceB: "both", sourceC: "both",
+
+    async init() {
+      const re = await fetch("/funnel/combinado-mx/etapas");
+      const data = await re.json();
+      this._groups = data.groups;
+      this._fillSelect(this.$refs.numSel, data.groups, this.num);
+      this._fillSelect(this.$refs.denSel, data.groups, this.den);
+      this._fillSelect(this.$refs.cosOrigen, data.groups, this.cosechaOrigen);
+      this._fillSelect(this.$refs.cosDestino, data.groups, this.cosechaDestino);
+      await this.loadFilters();
+      this.reload();
+    },
+
+    switchTab(t) { this.tab = t; },
+
+    _fillSelect(sel, groups, selected) {
+      sel.innerHTML = "";
+      for (const g of groups) {
+        const og = document.createElement("optgroup");
+        og.label = g.label;
+        for (const o of g.options) {
+          const opt = document.createElement("option");
+          opt.value = o.key; opt.textContent = o.label;
+          if (o.key === selected) opt.selected = true;
+          og.appendChild(opt);
+        }
+        sel.appendChild(og);
+      }
+    },
+
+    params() {
+      const s = Alpine.store("cmx");
+      const p = new URLSearchParams();
+      p.set("granularidad", this.granularidad);
+      p.set("fecha_desde", this.fechaDesde);
+      p.set("fecha_hasta", this.fechaHasta);
+      p.set("num", this.num); p.set("den", this.den);
+      for (const v of (s.equipo || [])) p.append("equipo", v);
+      for (const v of (s.area   || [])) p.append("area", v);
+      for (const v of (s.motivo || [])) p.append("motivo", v);
+      return p;
+    },
+
+    async loadFilters() {
+      const p = new URLSearchParams({fecha_desde: this.fechaDesde, fecha_hasta: this.fechaHasta});
+      const r = await fetch("/funnel/combinado-mx/filters?" + p);
+      this.filtersOptions = await r.json();
+      const meses = this.filtersOptions.meses || [];
+      if (!this.mesA && meses.length) { this.mesA = meses[0]; this.refreshCompare("A"); }
+      if (!this.mesB && meses.length > 1) { this.mesB = meses[1]; this.refreshCompare("B"); }
+      if (!this.mesC && meses.length) { this.mesC = meses[2] || meses[0]; this.refreshCompare("C"); }
+    },
+
+    refresh() { this.reload(); },
+
+    async reload() {
+      const r = await fetch("/funnel/combinado-mx/conv-time?" + this.params());
+      this.render(await r.json());
+      this.refreshCosechas();
+    },
+
+    // ── Cosechas ──
+    cosechaParams() {
+      const s = Alpine.store("cmx");
+      const p = new URLSearchParams();
+      p.set("origen", this.cosechaOrigen); p.set("destino", this.cosechaDestino);
+      p.set("granularidad", this.cosechaGran); p.set("bucket", this.cosechaBucket); p.set("conteo", this.cosechaConteo);
+      p.set("fecha_desde", this.fechaDesde); p.set("fecha_hasta", this.fechaHasta);
+      for (const v of (s.equipo || [])) p.append("equipo", v);
+      for (const v of (s.area   || [])) p.append("area", v);
+      for (const v of (s.motivo || [])) p.append("motivo", v);
+      return p;
+    },
+    async refreshCosechas() {
+      const r = await fetch("/funnel/combinado-mx/cosechas?" + this.cosechaParams());
+      this.cosechaData = await r.json();
+      this.renderCosechasTable();
+    },
+    renderCosechasTable() {
+      const d = this.cosechaData;
+      const table = document.getElementById("cosechasTable"); const empty = document.getElementById("cosechasEmpty");
+      if (!d || !d.rows || !d.rows.length) { if (table) table.innerHTML = ""; if (empty) empty.classList.remove("hidden"); this.cosechaTitle = ""; this.cosechaSummary = ""; return; }
+      if (empty) empty.classList.add("hidden");
+      this.cosechaTitle = `${d.origen_label} → ${d.destino_label}`;
+      const tl = d.rows.reduce((s, r) => s + r.total, 0), ta = d.rows.reduce((s, r) => s + r.alcanzaron, 0);
+      this.cosechaSummary = `${d.rows.length} cohortes · ${tl.toLocaleString("es-MX")} · ${(tl>0?ta/tl*100:0).toFixed(1)}% alcanzaron`;
+      const offsets = (d.bucket === "dias" && d.offset_ranges) ? d.offset_ranges : (d.offset_labels || []);
+      const acum = this.cosechaAcum, modo = this.cosechaModo, scaleMax = modo === "share" ? 60 : 50;
+      const bg = (v, f) => (f || v == null || v === 0) ? "" : `background:rgba(124,58,237,${(Math.min(1, v/scaleMax)*0.85).toFixed(3)});`;
+      const tc = (v, f) => { if (f) return "text-slate-300 dark:text-slate-700"; if (v == null || v === 0) return "text-slate-400 dark:text-slate-600"; if (v >= scaleMax*0.5) return "text-white font-semibold"; if (v >= scaleMax*0.2) return "text-slate-900 dark:text-slate-100 font-medium"; return "text-slate-700 dark:text-slate-300"; };
+      const today = new Date().toISOString().slice(0,10);
+      const fut = (co, off) => { let bs; if (this.cosechaGran === "semana") { const dt = new Date(co + "T00:00:00"); dt.setDate(dt.getDate() + off*7); bs = dt.toISOString().slice(0,10); } else { const [y, m] = co.split("-").map(Number); if (d.bucket === "dias") { const dt = new Date(y, m-1, 1); dt.setDate(dt.getDate() + off*30); bs = dt.toISOString().slice(0,10); } else { const dt = new Date(y, m-1+off, 1); bs = dt.toISOString().slice(0,10); } } return bs > today; };
+      let html = `<thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider"><tr><th class="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Cohorte</th><th class="px-2 py-2.5 text-right">Total</th><th class="px-2 py-2.5 text-right">Llegaron</th>`;
+      offsets.forEach(l => { html += `<th class="px-2 py-2.5 text-center">${l}</th>`; });
+      html += `</tr></thead><tbody class="divide-y divide-slate-100 dark:divide-slate-800">`;
+      d.rows.forEach(r => {
+        const pcts = acum ? r.cum_pct : r.pct, shares = acum ? r.cum_share : r.share, counts = acum ? r.cum_counts : r.counts;
+        const g = r.total > 0 ? (r.alcanzaron / r.total * 100) : 0;
+        html += `<tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/50"><td class="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-900">${r.cohorte}</td><td class="px-2 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">${r.total.toLocaleString("es-MX")}</td><td class="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300"><span class="font-semibold">${r.alcanzaron.toLocaleString("es-MX")}</span> <span class="text-[10px] text-slate-400 ml-1">${g.toFixed(1)}%</span></td>`;
+        offsets.forEach((l, i) => { const pct = pcts[i], sh = shares ? shares[i] : null, cn = counts[i]; const f = fut(r.cohorte, i); let txt, pv; if (f) { txt = "—"; pv = null; } else if (modo === "abs") { txt = cn == null ? "—" : cn.toLocaleString("es-MX"); pv = pct; } else if (modo === "share") { txt = sh == null ? "—" : sh.toFixed(1)+"%"; pv = sh; } else { txt = pct == null ? "—" : pct.toFixed(1)+"%"; pv = pct; } html += `<td class="px-2 py-2 text-center text-xs tabular-nums ${tc(pv, f)}" style="${bg(pv, f)}">${txt}</td>`; });
+        html += `</tr>`;
+      });
+      html += `</tbody>`; table.innerHTML = html;
+    },
+
+    // ── Comparación de funnels ──
+    async refreshCompare(c) {
+      const s = Alpine.store("cmx");
+      const p = new URLSearchParams();
+      const mes = c === "A" ? this.mesA : this.mesB;
+      if (mes) p.set("mes", mes);
+      p.set("source", c === "A" ? this.sourceA : this.sourceB);
+      for (const v of (s["cmp"+c+"_equipo"] || [])) p.append("equipo", v);
+      for (const v of (s["cmp"+c+"_area"]   || [])) p.append("area", v);
+      for (const v of (s["cmp"+c+"_motivo"] || [])) p.append("motivo", v);
+      const r = await fetch("/funnel/combinado-mx/funnel-compare?" + p);
+      this.renderCompare(c, await r.json());
+    },
+    renderCompare(c, data) {
+      const accent = c === "A" ? "#2563eb" : "#059669", fmt = n => n.toLocaleString("es-MX");
+      const hdr = document.getElementById("funnelHdr"+c);
+      if (hdr) hdr.innerHTML = `<span class="text-base font-bold" style="color:${accent}">${fmt(data.total)}</span> nids · Asignados · ${data.mes}`;
+      const box = document.getElementById("funnel"+c);
+      if (!box) return;
+      box.innerHTML = data.stages.map(s => {
+        const width = Math.max(2, s.pct_first);
+        const prev = s.pct_prev == null ? "" : `<span class="text-slate-400 dark:text-slate-500 ml-1">${s.pct_prev.toFixed(1)}% vs ant.</span>`;
+        return `<div><div class="flex items-baseline justify-between text-xs mb-0.5"><span class="font-medium text-slate-700 dark:text-slate-200">${s.label}</span><span class="tabular-nums"><span class="font-semibold text-slate-900 dark:text-slate-100">${fmt(s.nids)}</span><span class="font-semibold ml-1" style="color:${accent}">${s.pct_first.toFixed(1)}%</span>${prev}</span></div><div class="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full" style="width:${width}%;background:${accent}"></div></div></div>`;
+      }).join("");
+    },
+
+    render(data) {
+      const fmt = n => n.toLocaleString("es-MX");
+      const totalsEl = document.getElementById("convTotals");
+      if (totalsEl) {
+        const tc = data.total_cvr == null ? "—" : data.total_cvr.toFixed(2) + "%";
+        totalsEl.innerHTML = `${data.num_label} / ${data.den_label} · Total: <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_num)}</strong> / <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_den)}</strong> = <strong class="text-brand-600 dark:text-brand-400">${tc}</strong>`;
+      }
+      const el = document.getElementById("chartCombo");
+      if (!el) return;
+      Chart.getChart(el)?.destroy();
+      new Chart(el.getContext("2d"), {
+        type: "line",
+        data: { labels: data.labels, datasets: [
+          { label: "CVR %", type: "line", yAxisID: "y1", data: data.cvr, borderColor: "#7c3aed", backgroundColor: "rgba(124,58,237,0.12)", fill: true, tension: 0.25, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, order: 0 },
+          { label: data.num_label, type: "bar", yAxisID: "y2", data: data.num, backgroundColor: "rgba(16,185,129,0.55)", borderWidth: 0, borderRadius: 3, order: 2 },
+          { label: data.den_label, type: "bar", yAxisID: "y2", data: data.den, backgroundColor: "rgba(148,163,184,0.30)", borderWidth: 0, borderRadius: 3, order: 3 },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          plugins: { legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "rect", padding: 14, font: { size: 11 } } }, tooltip: { callbacks: { label: c => { if (c.dataset.label === "CVR %") return ` CVR: ${c.parsed.y == null ? "—" : c.parsed.y.toFixed(2)+"%"}`; return ` ${c.dataset.label}: ${c.parsed.y.toLocaleString("es-MX")}`; } } } },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 11 } } }, y1: { position: "left", beginAtZero: true, title: { display: true, text: "CVR %", font: { size: 11 } }, ticks: { font: { size: 11 }, callback: v => v.toFixed(0)+"%" } }, y2: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: "Volumen", font: { size: 11 } }, ticks: { font: { size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+"k" : v } } },
+          animation: { duration: 0 },
+        },
+      });
+    },
+
+    resetFiltros() {
+      const s = Alpine.store("cmx");
+      s.equipo = []; s.area = []; s.motivo = [];
+      document.querySelectorAll("[x-data^=\"multiSelect('\"]").forEach(el => { const d = el._x_dataStack && el._x_dataStack[0]; if (d && ["equipo","area","motivo"].includes(d.key)) d.values = []; });
+      this.reload();
+    },
+  };
+}
+</script>
+{% endblock %}

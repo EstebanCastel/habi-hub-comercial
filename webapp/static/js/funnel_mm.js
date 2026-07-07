@@ -3,7 +3,7 @@
 // Stores compartidos (Alpine)
 document.addEventListener("alpine:init", () => {
   Alpine.store("filters", {
-    equipo: [], cat_com: [], cat: [], recurrencia: [], fuente: [], area: [],
+    equipo: [], cat_com: [], cat: [], recurrencia: [], fuente: [], area: [], motivo: [], campaign: [],
     // Locales a Share de categorización (override del global SÓLO para esa card)
     shareCatFuente: [],
     shareCatEquipo: [],
@@ -15,6 +15,10 @@ document.addEventListener("alpine:init", () => {
     convTimeEquipo: [],
     convTimeArea: [],
     convTimePrioridadMM: [],
+    convTimeCampaign: [],
+    // Filtros de la comparación de cohortes (A / B)
+    cmpA_equipo: [], cmpA_cat: [], cmpA_fuente: [], cmpA_motivo: [],
+    cmpB_equipo: [], cmpB_cat: [], cmpB_fuente: [], cmpB_motivo: [],
   });
 });
 
@@ -64,7 +68,14 @@ function multiSelect(key, getOptionsFn, onChange) {
     key,
     values: [],
     open: false,
+    filter: "",
     options() { return getOptionsFn() || []; },
+    // Opciones tras el buscador interno (solo se usa donde se renderiza el input `filter`)
+    filteredOptions() {
+      const f = (this.filter || "").toLowerCase().trim();
+      const opts = this.options();
+      return f ? opts.filter(o => (o || "").toLowerCase().includes(f)) : opts;
+    },
     allSelected() { return this.values.length === this.options().length && this.options().length > 0; },
     toggle(v) {
       const i = this.values.indexOf(v);
@@ -101,7 +112,7 @@ function filterParams() {
     fecha_hasta: root.fechaHasta,
     granularidad: root.granularidad,
   };
-  ["equipo","cat_com","cat","recurrencia","fuente","area"].forEach(k => {
+  ["equipo","cat_com","cat","recurrencia","fuente","area","motivo","campaign"].forEach(k => {
     if (f[k] && f[k].length) out[k] = f[k];
   });
   return out;
@@ -122,9 +133,9 @@ function funnelMM() {
     fechaDesde: document.body.dataset.fechaDesde || "2026-01-01",
     fechaHasta: document.body.dataset.fechaHasta || new Date().toISOString().slice(0,10),
     granularidad: "mes",
-    filtersOptions: { equipos:[], cats_com:[], cats:[], recurrencias:[], fuentes:[], areas:[] },
+    filtersOptions: { equipos:[], cats_com:[], cats:[], recurrencias:[], fuentes:[], areas:[], motivos:[], campaigns:[] },
     etapasList: [],
-    loading: { volumen: false, kpis: false, shareCat: false, convTime: false, negocios: false, metas: false, cosechas: false, precios: false },
+    loading: { volumen: false, kpis: false, shareCat: false, shareMotivo: false, convTime: false, negocios: false, metas: false, cosechas: false, precios: false },
     negociosEtapa: "fecha_asignacion",
     negociosSearch: "",
     negociosPage: 1,
@@ -138,6 +149,11 @@ function funnelMM() {
     // Share categorización: filtros locales
     shareCatExcluirSin: false,
     lastShareCatData: null,
+    // Share razón de venta
+    shareMotivoExcluirSin: false,
+    lastShareMotivoData: null,
+    chartMotivoDonut: null,
+    chartMotivoBars: null,
     debounceT: null,
     refreshing: false,
     // Tab state
@@ -155,6 +171,9 @@ function funnelMM() {
     metaKpi: {},
     metaCicloLabel: "",
     sparkCharts: {},
+    // Comparación de funnels (cohorte A / B)
+    mesA: "",
+    mesB: "",
     // Cosechas
     cosechasInited: false,
     etapasFull: [],         // [{key, label}, ...]
@@ -208,12 +227,14 @@ function funnelMM() {
         });
         this.refreshVolumen();
         this.refreshShareCat();
+        this.refreshShareMotivo();
         this.refreshConvTime();
         this.refreshNegocios();
         if (this.tab === "metas" && !this.metasInited) this.initMetas();
         if (this.tab === "cosechas" && !this.cosechasInited) {
           this.cosechasInited = true;
           this.refreshCosechas();
+          this.initCompare();
         }
         if (this.tab === "precios" && !this.preciosInited) this.initPrecios();
       });
@@ -240,6 +261,7 @@ function funnelMM() {
         await this.loadFilterOptions();
         this.refreshVolumen();
         this.refreshShareCat();
+        this.refreshShareMotivo();
         this.refreshConvTime();
         this.refreshNegocios();
         htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
@@ -256,6 +278,7 @@ function funnelMM() {
       this.debounceT = setTimeout(() => {
         this.refreshVolumen();
         this.refreshShareCat();
+        this.refreshShareMotivo();
         this.refreshConvTime();
         this.negociosPage = 1;
         this.refreshNegocios();
@@ -274,10 +297,59 @@ function funnelMM() {
       if (t === "cosechas" && !this.cosechasInited) {
         this.cosechasInited = true;
         this.refreshCosechas();
+        this.initCompare();
       }
       if (t === "precios" && !this.preciosInited) {
         this.initPrecios();
       }
+    },
+
+    // ── Comparación de funnels (cohorte A vs B) ─────────────────────────────
+    initCompare() {
+      const meses = this.filtersOptions.meses || [];
+      if (!this.mesA && meses.length) { this.mesA = meses[0]; this.refreshCompare("A"); }
+      if (!this.mesB && meses.length > 1) { this.mesB = meses[1]; this.refreshCompare("B"); }
+    },
+
+    async refreshCompare(c) {
+      const s = Alpine.store("filters");
+      const p = new URLSearchParams();
+      const mes = c === "A" ? this.mesA : this.mesB;
+      if (mes) p.set("mes", mes);
+      for (const v of (s["cmp"+c+"_equipo"] || [])) p.append("equipo", v);
+      for (const v of (s["cmp"+c+"_cat"]    || [])) p.append("cat", v);
+      for (const v of (s["cmp"+c+"_fuente"] || [])) p.append("fuente", v);
+      for (const v of (s["cmp"+c+"_motivo"] || [])) p.append("motivo", v);
+      const r = await fetch(`/funnel/mm/funnel-compare?${p}`);
+      this.renderCompare(c, await r.json());
+    },
+
+    renderCompare(c, data) {
+      const accent = c === "A" ? "#2563eb" : "#059669";   // azul / esmeralda
+      const excl = "#ef4444";                              // rojo (exclusión)
+      const fmt = n => n.toLocaleString("es-CO");
+      const hdr = document.getElementById("funnelHdr"+c);
+      if (hdr) hdr.innerHTML = `<span class="text-base font-bold" style="color:${accent}">${fmt(data.total)}</span> nids · Primer Asignación · ${data.mes}`;
+      const box = document.getElementById("funnel"+c);
+      if (!box) return;
+      box.innerHTML = data.stages.map(s => {
+        const color = s.exclusion ? excl : accent;
+        const width = Math.max(2, s.pct_first);
+        const prev = s.pct_prev == null ? "" : `<span class="text-slate-400 dark:text-slate-500 ml-1">${s.pct_prev.toFixed(1)}% vs ant.</span>`;
+        return `
+          <div>
+            <div class="flex items-baseline justify-between text-xs mb-0.5">
+              <span class="${s.exclusion ? 'italic text-slate-500 dark:text-slate-400' : 'font-medium text-slate-700 dark:text-slate-200'}">${s.exclusion ? '⊘ ' : ''}${s.label}</span>
+              <span class="tabular-nums">
+                <span class="font-semibold text-slate-900 dark:text-slate-100">${fmt(s.nids)}</span>
+                <span class="font-semibold ml-1" style="color:${color}">${s.pct_first.toFixed(1)}%</span>${prev}
+              </span>
+            </div>
+            <div class="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div class="h-full rounded-full" style="width:${width}%;background:${color}"></div>
+            </div>
+          </div>`;
+      }).join("");
     },
 
     async initMetas() {
@@ -514,10 +586,11 @@ function funnelMM() {
 
       const tbody = document.getElementById("negocios-tbody");
       if (!data.rows.length) {
-        tbody.innerHTML = `<tr><td colspan="13" class="px-3 py-6 text-center text-slate-400 dark:text-slate-500">Sin resultados</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="14" class="px-3 py-6 text-center text-slate-400 dark:text-slate-500">Sin resultados</td></tr>`;
         return;
       }
       const dash = '<span class="text-slate-300 dark:text-slate-600">—</span>';
+      const esc = s => (s == null ? "" : String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"));
       tbody.innerHTML = data.rows.map(r => `
         <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">
           <td class="px-3 py-2 font-mono text-[11px] md:text-xs">${r.nid}</td>
@@ -526,6 +599,7 @@ function funnelMM() {
           <td class="px-3 py-2 whitespace-nowrap">${r.categoria || dash}</td>
           <td class="px-3 py-2 whitespace-nowrap">${r.fuente || dash}</td>
           <td class="px-3 py-2 whitespace-nowrap">${r.area_metropolitana || dash}</td>
+          <td class="px-3 py-2 max-w-[200px] truncate" title="${esc(r.motivo_venta)}">${r.motivo_venta ? esc(r.motivo_venta) : dash}</td>
           <td class="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400">${r.fecha_asignacion || dash}</td>
           <td class="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400">${r.fecha_cita || dash}</td>
           <td class="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400">${r.fecha_visita || dash}</td>
@@ -556,7 +630,7 @@ function funnelMM() {
         p++;
         if (p > 50) break;  // safety
       }
-      const headers = ["nid","equipo","categoria_comercial","categoria","fuente","area_metropolitana","fecha_asignacion","fecha_cita","fecha_visita","fecha_precomite","fecha_aprobado","fecha_acepto","fecha_cierre"];
+      const headers = ["nid","equipo","categoria_comercial","categoria","fuente","area_metropolitana","motivo_venta","motivo_cat","fecha_asignacion","fecha_cita","fecha_visita","fecha_precomite","fecha_aprobado","fecha_acepto","fecha_cierre"];
       const csv = [headers.join(",")].concat(
         all.map(r => headers.map(h => `"${(r[h] || "").toString().replace(/"/g,'""')}"`).join(","))
       ).join("\n");
@@ -600,6 +674,18 @@ function funnelMM() {
       }
     },
 
+    async refreshShareMotivo() {
+      this.loading.shareMotivo = true;
+      try {
+        const r = await fetch(`/funnel/mm/share-motivo?${buildQS(filterParams())}`);
+        const data = await r.json();
+        this.lastShareMotivoData = data;
+        this.renderShareMotivo(data);
+      } finally {
+        this.loading.shareMotivo = false;
+      }
+    },
+
     async refreshConvTime() {
       this.loading.convTime = true;
       try {
@@ -613,6 +699,7 @@ function funnelMM() {
         if ((s.convTimeEquipo      || []).length) params.equipo       = s.convTimeEquipo;
         if ((s.convTimeArea        || []).length) params.area         = s.convTimeArea;
         if ((s.convTimePrioridadMM || []).length) params.prioridad_mm = s.convTimePrioridadMM;
+        if ((s.convTimeCampaign    || []).length) params.campaign     = s.convTimeCampaign;
         const r = await fetch(`/funnel/mm/conv-time?${buildQS(params)}`);
         this.renderConvTime(await r.json());
       } finally {
@@ -753,6 +840,106 @@ function funnelMM() {
           animation: { duration: 300 },
         }
       }); } catch (e) { console.error("renderShareCat bars failed", e); }
+    },
+
+    // ── Render: Share razón de venta (donut + stacked bars + leyenda) ──────
+    renderShareMotivo(data) {
+      if (!data) return;
+      // Toggle local: remover "Sin dato" y recalcular total/share
+      if (this.shareMotivoExcluirSin) {
+        const keep = data.donut.labels.map(l => l !== "Sin dato");
+        const labels = data.donut.labels.filter((_, i) => keep[i]);
+        const values = data.donut.values.filter((_, i) => keep[i]);
+        const colors = data.donut.colors.filter((_, i) => keep[i]);
+        const total = values.reduce((s, v) => s + v, 0);
+        const datasets = data.bars.datasets.filter(ds => ds.label !== "Sin dato");
+        data = {
+          donut: { labels, values, colors, total },
+          bars: { labels: data.bars.labels, datasets },
+        };
+      }
+      const t = chartTheme();
+      // Donut
+      const elD = document.getElementById("chart-motivo-donut");
+      if (!elD) return;
+      Chart.getChart(elD)?.destroy();
+      this.chartMotivoDonut = null;
+      const ctxD = elD.getContext("2d");
+      if (!ctxD) return;
+      try { this.chartMotivoDonut = new Chart(ctxD, {
+        type: "doughnut",
+        data: { labels: data.donut.labels, datasets: [{ data: data.donut.values, backgroundColor: data.donut.colors, borderWidth: 2, borderColor: isDarkMode() ? "#0f172a" : "#fff" }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: "62%",
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: c => {
+              const pct = data.donut.total > 0 ? (c.parsed/data.donut.total*100).toFixed(1) : "0.0";
+              return ` ${c.label}: ${c.parsed.toLocaleString("es-CO")} (${pct}%)`;
+            } } }
+          },
+        }
+      }); } catch (e) { console.error("renderShareMotivo donut failed", e); }
+      // Leyenda
+      const legend = document.getElementById("motivo-legend");
+      if (data.donut.total === 0) {
+        legend.innerHTML = '<div class="text-xs text-slate-400 dark:text-slate-500">Sin datos</div>';
+      } else {
+        legend.innerHTML = `
+          <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">Total asignados</div>
+          <div class="text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">${data.donut.total.toLocaleString("es-CO")}</div>
+        ` + data.donut.labels.map((l, i) => {
+          const v = data.donut.values[i];
+          const pct = (v / data.donut.total * 100).toFixed(1);
+          return `
+            <div class="flex items-center gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:${data.donut.colors[i]}"></span>
+              <span class="flex-1 text-slate-700 dark:text-slate-300">${l}</span>
+              <span class="text-slate-500 dark:text-slate-400 tabular-nums">${v.toLocaleString("es-CO")}</span>
+              <span class="font-semibold tabular-nums" style="color:${data.donut.colors[i]}">${pct}%</span>
+            </div>`;
+        }).join("");
+      }
+      // Stacked bars
+      const elB = document.getElementById("chart-motivo-bars");
+      if (!elB) return;
+      Chart.getChart(elB)?.destroy();
+      this.chartMotivoBars = null;
+      const ctxB = elB.getContext("2d");
+      if (!ctxB) return;
+      try { this.chartMotivoBars = new Chart(ctxB, {
+        type: "bar",
+        data: {
+          labels: data.bars.labels,
+          datasets: data.bars.datasets.map(d => ({
+            label: d.label, data: d.data, backgroundColor: d.color,
+            stack: "motivo", borderWidth: 0, borderRadius: 3,
+          })),
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "rect", padding: 12, font: { size: 11 }, color: t.text } },
+            tooltip: {
+              mode: "index", intersect: false,
+              callbacks: {
+                label: c => {
+                  const total = c.chart.data.datasets.reduce((s,d) => s + (d.data[c.dataIndex]||0), 0);
+                  const pct = total > 0 ? (c.parsed.y/total*100).toFixed(1) : "0.0";
+                  return ` ${c.dataset.label}: ${c.parsed.y.toLocaleString("es-CO")} (${pct}%)`;
+                },
+                footer: items => " Total: " + items[0].chart.data.datasets.reduce((s,d) => s + (d.data[items[0].dataIndex]||0), 0).toLocaleString("es-CO"),
+              }
+            }
+          },
+          scales: {
+            x: { stacked: true, grid: { display: false }, ticks: { color: t.text, font: { size: 11 } } },
+            y: { stacked: true, beginAtZero: true, grid: { color: t.grid }, ticks: { color: t.text, font: { size: 11 },
+                 callback: v => v >= 1000 ? (v/1000).toFixed(0)+"k" : v } }
+          },
+          animation: { duration: 300 },
+        }
+      }); } catch (e) { console.error("renderShareMotivo bars failed", e); }
     },
 
     // ── Render: Conversion in time (line + bars dual-axis) ────────────────
@@ -974,8 +1161,8 @@ function funnelMM() {
     },
 
     resetFilters() {
-      ["equipo","cat_com","cat","recurrencia","fuente","area",
-       "convTimeFuente","convTimeEquipo","convTimeArea","convTimePrioridadMM"].forEach(k => {
+      ["equipo","cat_com","cat","recurrencia","fuente","area","motivo","campaign",
+       "convTimeFuente","convTimeEquipo","convTimeArea","convTimePrioridadMM","convTimeCampaign"].forEach(k => {
         Alpine.store("filters")[k] = [];
       });
       document.querySelectorAll("[x-data^='multiSelect']").forEach(el => {

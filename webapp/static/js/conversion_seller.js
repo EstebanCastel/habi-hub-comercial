@@ -2,8 +2,14 @@
 
 function multiSelectCS(key, getOptionsFn, onChange) {
   return {
-    key, values: [], open: false,
+    key, values: [], open: false, filter: "",
     options() { return getOptionsFn() || []; },
+    // Opciones tras el buscador interno (solo se usa donde se renderiza el input `filter`)
+    filteredOptions() {
+      const f = (this.filter || "").toLowerCase().trim();
+      const opts = this.options();
+      return f ? opts.filter(o => (o || "").toLowerCase().includes(f)) : opts;
+    },
     allSelected() { return this.values.length === this.options().length && this.options().length > 0; },
     toggle(v) {
       const i = this.values.indexOf(v);
@@ -41,6 +47,9 @@ function convSeller() {
     selectedEquipos: [],
     selectedCats: [],
     selectedComerciales: [],
+    selectedPriorities: [],   // solo Inmo
+    selectedCampaigns: [],    // utm_campaign (server-side → re-fetch)
+    campaignOptions: [],
     refreshing: false,
     shareCatMode: "lead",   // 'lead' (categoría del inmueble) | 'seller' (categoría del comercial)
     cvrLinesChart: null,
@@ -48,7 +57,23 @@ function convSeller() {
     init() {
       // Re-renderiza el chart de líneas al cambiar el toggle lead/seller
       this.$watch("shareCatMode", () => this.renderCvrLines());
+      this.loadCampaigns();
       this.loadCycles().then(() => this.loadData());
+    },
+
+    async loadCampaigns() {
+      try {
+        const r = await fetch("/conversion/seller/campaigns");
+        const j = await r.json();
+        this.campaignOptions = j.campaigns || [];
+      } catch (e) { this.campaignOptions = []; }
+    },
+
+    // El filtro de campaña es server-side: al cambiar hay que re-fetchear /data.
+    onCampaignChange() {
+      const el = document.querySelector("[x-data*=\"multiSelectCS('campana'\"]");
+      this.selectedCampaigns = el?._x_dataStack?.[0]?.values || [];
+      this.loadData();
     },
 
     async loadCycles() {
@@ -63,7 +88,9 @@ function convSeller() {
     },
 
     async loadData() {
-      const r = await fetch("/conversion/seller/data");
+      const qs = (this.selectedCampaigns || [])
+        .map(c => "campaign=" + encodeURIComponent(c)).join("&");
+      const r = await fetch("/conversion/seller/data" + (qs ? "?" + qs : ""));
       this.raw = await r.json();
       this.rebuild();
     },
@@ -102,7 +129,33 @@ function convSeller() {
       this.allRows.forEach(r => { if (r.email && r.ciclo === this.ciclo && (r.asignados || 0) > 0) set.add(r.email); });
       return [...set].sort();
     },
+    get prioOptions() {
+      // Prioridades de gestión inmo presentes en los datos (asignados o captados)
+      const set = new Set();
+      this.allRows.forEach(r => {
+        Object.keys(r.asig_prio || {}).forEach(p => set.add(p));
+        Object.keys(r.num_prio  || {}).forEach(p => set.add(p));
+      });
+      return [...set].sort();
+    },
     get allRows() { return this.raw[this.producto] || []; },
+
+    // Aplica el filtro de prioridad inmo a una fila: recalcula asignados/num/cvr y los
+    // breakdowns por categoría a partir del breakdown por prioridad. No-op para MM o
+    // cuando no hay prioridades seleccionadas.
+    applyPrio(r) {
+      if (this.producto !== "inmo" || !this.selectedPriorities.length) return r;
+      let asig = 0, num = 0;
+      this.selectedPriorities.forEach(p => {
+        asig += (r.asig_prio && r.asig_prio[p]) || 0;
+        num  += (r.num_prio  && r.num_prio[p])  || 0;
+      });
+      const cvr = asig > 0 ? num / asig : null;
+      const k = ["A", "B", "C"].includes(r.categoria) ? r.categoria : "SC";
+      const asig_cat = { A: 0, B: 0, C: 0, SC: 0 }; asig_cat[k] = asig;
+      const num_cat  = { A: 0, B: 0, C: 0, SC: 0 }; num_cat[k]  = num;
+      return { ...r, asignados: asig, num, cvr, asig_cat, num_cat };
+    },
 
     // ── Share por categoría (barras 100% apiladas) ──────────────────────────────
     get shareCats() {
@@ -163,12 +216,17 @@ function convSeller() {
       // Multi-selects values reading
       this.refreshSelectedFromStores();
 
+      const prioActive = this.producto === "inmo" && this.selectedPriorities.length > 0;
       let rows = this.allRows.filter(r => {
         if (r.ciclo !== this.ciclo) return false;
         if (this.selectedEquipos.length && !this.selectedEquipos.includes(r.equipo || "Sin equipo")) return false;
         if (this.selectedCats.length && !this.selectedCats.includes(r.categoria)) return false;
         if (this.selectedComerciales.length && !this.selectedComerciales.includes(r.email)) return false;
         if (this.search && !(r.email || "").includes(this.search)) return false;
+        return true;
+      }).map(r => this.applyPrio(r)).filter(r => {
+        // Con prioridad activa, oculta sellers sin actividad en la(s) prioridad(es) elegida(s)
+        if (prioActive && (r.asignados || 0) === 0 && (r.num || 0) === 0) return false;
         if ((r.asignados || 0) < this.minAsig) return false;
         return true;
       });
@@ -227,9 +285,8 @@ function convSeller() {
         if (this.selectedCats.length && !this.selectedCats.includes(r.categoria)) return false;
         if (this.selectedComerciales.length && !this.selectedComerciales.includes(r.email)) return false;
         if (this.search && !(r.email || "").includes(this.search)) return false;
-        if ((r.asignados || 0) < this.minAsig) return false;
         return true;
-      });
+      }).map(r => this.applyPrio(r)).filter(r => (r.asignados || 0) >= this.minAsig);
       const cycles = [...new Set(this.allRows.map(r => r.ciclo))].sort((a, b) => a - b);
       const labels = cycles.map(c => "Ciclo " + c);
       const agg = {};
@@ -290,12 +347,14 @@ function convSeller() {
 
     refreshSelectedFromStores() {
       // Lee los valores actuales de los multi-selects desde sus _x_dataStack
-      const eqEl  = document.querySelector("[x-data*=\"multiSelectCS('equipo'\"]");
-      const catEl = document.querySelector("[x-data*=\"multiSelectCS('categoria'\"]");
-      const comEl = document.querySelector("[x-data*=\"multiSelectCS('comercial'\"]");
+      const eqEl   = document.querySelector("[x-data*=\"multiSelectCS('equipo'\"]");
+      const catEl  = document.querySelector("[x-data*=\"multiSelectCS('categoria'\"]");
+      const comEl  = document.querySelector("[x-data*=\"multiSelectCS('comercial'\"]");
+      const prioEl = document.querySelector("[x-data*=\"multiSelectCS('prioridad'\"]");
       this.selectedEquipos     = eqEl?._x_dataStack?.[0]?.values || [];
       this.selectedCats        = catEl?._x_dataStack?.[0]?.values || [];
       this.selectedComerciales = comEl?._x_dataStack?.[0]?.values || [];
+      this.selectedPriorities  = prioEl?._x_dataStack?.[0]?.values || [];
     },
 
     updateKpis(globalCvr, totalAsig, totalNum) {

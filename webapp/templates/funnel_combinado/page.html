@@ -6,7 +6,7 @@
 {% macro ms(name, label, all_label="Todos") %}
 <div class="flex flex-col gap-1 min-w-0">
   <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
-  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','area':'areas'}[name] }}, () => refreshConvTime())"
+  <div x-data="multiSelect('{{ name }}', () => filtersOptions.{{ {'equipo':'equipos','area':'areas','motivo':'motivos','bnpl':'bnpl'}[name] }}, () => refreshConvTime())"
        class="relative" @click.outside="open=false">
     <button type="button" @click="open = !open"
       class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
@@ -34,6 +34,65 @@
       <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
     </div>
   </div>
+</div>
+{% endmacro %}
+
+{# Macro: multi-select para un panel de cohorte (opciones explícitas) #}
+{% macro cohort_ms(c, key, label, opts) %}
+<div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{{ label }}</label>
+  <div x-data="multiSelect('cmp{{ c }}_{{ key }}', () => filtersOptions.{{ opts }} || [], () => refreshCompare('{{ c }}'))" class="relative" @click.outside="open=false">
+    <button type="button" @click="open=!open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# Macro: panel de cohorte (A / B) para la comparación de funnels #}
+{% macro cohort_panel(c, title, dot) %}
+<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+  <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+    <span class="w-2.5 h-2.5 rounded-full" style="background:{{ dot }}"></span>{{ title }}
+  </h2>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3">
+    <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+      <select x-model="mes{{ c }}" @change="refreshCompare('{{ c }}')"
+        class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+        <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+      </select>
+    </div>
+    {{ cohort_ms(c, 'equipo', 'Equipo', 'equipos') }}
+    {{ cohort_ms(c, 'area',   'Área',   'areas') }}
+    {{ cohort_ms(c, 'motivo', 'Razón de venta', 'motivos') }}
+  </div>
+  <div class="flex flex-col gap-1 mt-2">
+    <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Asignados</span>
+    <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-xs w-fit">
+      <template x-for="o in [['both','MM + Inmo'],['mm','MM'],['inmo','Inmo']]" :key="o[0]">
+        <button @click="source{{ c }}=o[0]; refreshCompare('{{ c }}')" x-text="o[1]"
+          :class="source{{ c }}===o[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="px-3 py-1.5"></button>
+      </template>
+    </div>
+  </div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mt-3 mb-2" id="funnelHdr{{ c }}">—</div>
+  <div id="funnel{{ c }}" class="space-y-2"></div>
 </div>
 {% endmacro %}
 
@@ -70,6 +129,8 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-8 gap-3">
       {{ ms('equipo', 'Equipo') }}
       {{ ms('area', 'Área') }}
+      {{ ms('motivo', 'Razón de venta', 'Todas') }}
+      {{ ms('bnpl', 'Aplica BNPL', 'Todos') }}
 
       <div class="flex flex-col gap-1 min-w-0">
         <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
@@ -101,6 +162,20 @@
       </button>
     </div>
   </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['cvr','Conversión'],['cosechas','Cosechas']]" :key="t[0]">
+        <button @click="switchTab(t[0])"
+          :class="tab===t[0] ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- ─────────── TAB: CVR ─────────── -->
+  <div x-show="tab==='cvr'" class="space-y-4">
 
   <!-- Tasa de conversión en el tiempo -->
   <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
@@ -151,9 +226,74 @@
     </div>
 
     <p class="mt-3 text-[11px] text-slate-400 dark:text-slate-500">
-      <strong>Conteo:</strong> distinct <code>(producto, nid)</code> — un nid presente en MM y en Inmo cuenta una vez por producto.
+      <strong>Conteo:</strong> <code>COUNT(DISTINCT nid)</code> — nid único: un negocio que pasó por MM y por Inmo cuenta una sola vez.
     </p>
   </div>
+
+  </div><!-- /tab cvr -->
+
+  <!-- ─────────── TAB: COSECHAS ─────────── -->
+  <div x-show="tab==='cosechas'" x-cloak class="space-y-4">
+
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cosechas · <span x-text="cosechaTitle" class="text-brand-600 dark:text-brand-400"></span></h2>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Entidad = nid por producto · % que pasan de origen a destino en N semanas/meses</p>
+      </div>
+      <span class="text-xs text-slate-500 dark:text-slate-400" x-text="cosechaSummary"></span>
+    </div>
+    <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Origen
+        <select x-model="cosechaOrigen" @change="refreshCosechas()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal">
+          <template x-for="g in etapaGroups" :key="g.label"><optgroup :label="g.label"><template x-for="opt in g.options" :key="opt.key"><option :value="opt.key" x-text="opt.label"></option></template></optgroup></template>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Destino
+        <select x-model="cosechaDestino" @change="refreshCosechas()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal">
+          <template x-for="g in etapaGroups" :key="g.label"><optgroup :label="g.label"><template x-for="opt in g.options" :key="opt.key"><option :value="opt.key" x-text="opt.label"></option></template></optgroup></template>
+        </select>
+      </label>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="g in [['semana','Semana'],['mes','Mes']]" :key="g[0]"><button @click="cosechaGran=g[0]; refreshCosechas()" x-text="g[1]" :class="cosechaGran===g[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Bucket</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="b in [['iso','ISO'],['dias','7d/30d']]" :key="b[0]"><button @click="cosechaBucket=b[0]; refreshCosechas()" x-text="b[1]" :class="cosechaBucket===b[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Conteo</span>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+          <template x-for="m in [['cohorte','Cohorte'],['funnel','Funnel']]" :key="m[0]"><button @click="cosechaConteo=m[0]; refreshCosechas()" x-text="m[1]" :class="cosechaConteo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1"><span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Modo</span>
+        <div class="flex items-center gap-2">
+          <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs flex-1">
+            <template x-for="m in [['pct','% coh.'],['share','Share'],['abs','Núm.']]" :key="m[0]"><button @click="cosechaModo=m[0]; renderCosechasTable()" x-text="m[1]" :class="cosechaModo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'" class="flex-1 px-2 py-1.5"></button></template>
+          </div>
+          <label class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap"><input type="checkbox" x-model="cosechaAcum" @change="renderCosechasTable()" class="accent-brand-600">Acum.</label>
+        </div>
+      </div>
+    </div>
+    <div class="overflow-x-auto"><table class="min-w-full text-xs md:text-sm" id="cosechasTable"></table></div>
+    <div id="cosechasEmpty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+  </div>
+
+  <!-- Comparación de funnels -->
+  <div>
+    <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-1">Comparar funnels</h2>
+    <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">Funnel combinado (MM + Inmo) por etapas presets; cohorte = asignados del mes. Cada lado con filtros independientes.</p>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {{ cohort_panel('A', 'Cohorte A', '#2563eb') }}
+      {{ cohort_panel('B', 'Cohorte B', '#059669') }}
+      {{ cohort_panel('C', 'Cohorte C', '#d97706') }}
+    </div>
+  </div>
+
+  </div><!-- /tab cosechas -->
 </div>
 {% endblock %}
 

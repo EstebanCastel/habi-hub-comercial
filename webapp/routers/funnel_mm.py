@@ -49,11 +49,90 @@ ETAPAS_MM = [
     {"key": "Cierre - Comprado",            "label": "Cierre",          "color": "#1e40af"},
 ]
 
+# Etapas para la comparación de funnels cohortados (key BQ, label, es_exclusion).
+FUNNEL_COMPARE_STAGES = [
+    ("Primer_asigancion",               "Primer Asignación",   False),
+    ("Cita agendada",                   "Cita agendada",       False),
+    ("Visita efectuada",                "Visita efectuada",    False),
+    ("pre-comité validado",             "Pre-comité validado", False),
+    ("Descartado por comité",           "Descartado por comité", True),
+    ("Aprobado",                        "Aprobado",            False),
+    ("Aceptó Oferta - Pendiente firma", "Aceptó oferta",       False),
+    ("Cierre - Comprado",               "Cierre",              False),
+]
+
 
 def _quote_list(items: list[str]) -> str:
     """SQL string list ('a','b','c')."""
     safe = [i.replace("'", "''") for i in items]
     return ", ".join(f"'{s}'" for s in safe)
+
+
+# ── Razón de venta (motivo_venta_string — texto libre, categorizado por keywords) ──
+# Fuente: 1 fila por nid (dedup por última interacción). El campo es texto libre
+# escrito a mano (~2k variantes), así que se agrupa en categorías por keywords para
+# el share chart y el filtro; el listado de negocios muestra el texto crudo.
+MOTIVO_TABLE = "sellers-main-prod.mid_funnel_ibuyer.seller_digital_co_recepcionista_mm"
+
+# Taxonomía oficial de razón de venta (6 categorías) — label → color.
+# El orden define el orden en el donut/barras; la prioridad del CASE (para resolver
+# overlaps de keywords) vive en _motivo_cat_sql. 'Sin dato' se maneja aparte.
+MOTIVO_CATEGORIAS = [
+    {"key": "Cambio de casa",       "color": "#3b82f6"},
+    {"key": "Reubicación",          "color": "#10b981"},
+    {"key": "Inversión",            "color": "#7c3aed"},
+    {"key": "Necesidad financiera", "color": "#ea580c"},
+    {"key": "Separación",           "color": "#db2777"},
+    {"key": "Otro",                 "color": "#64748b"},
+]
+MOTIVO_SIN = "Sin dato"  # nids sin motivo registrado en la tabla
+
+
+def _motivo_cat_sql(field: str) -> str:
+    """CASE que mapea motivo_venta_string (texto libre) → categoría oficial.
+
+    El orden de los WHEN importa: necesidad financiera / separación / inversión se
+    evalúan antes que reubicación / cambio de casa para evitar falsos positivos por
+    overlap de keywords (ej. 'inversión en otro inmueble' → Inversión, no Cambio).
+    """
+    m = f"LOWER(TRIM({field}))"
+    return f"""CASE
+      WHEN {field} IS NULL THEN '{MOTIVO_SIN}'
+      WHEN REGEXP_CONTAINS({m}, r'deuda|liqui|dinero|efectivo|plata|capital|saldar|solventar|crédito|credito|hipoteca|prestamo|préstamo|financ|gastos|salud|enferm|urgenci') THEN 'Necesidad financiera'
+      WHEN REGEXP_CONTAINS({m}, r'separaci|separad|divorci|bienes|herenci|sucesi|fallec|viud|falleci') THEN 'Separación'
+      WHEN REGEXP_CONTAINS({m}, r'inversi|invertir|negocio|oportunidad|reinvers|rentab|proyecto|renta') THEN 'Inversión'
+      WHEN REGEXP_CONTAINS({m}, r'ciudad|viaje|traslad|me voy|me mudo|mudar|mudan|exterior|país|pais|fuera|extranjer|emigr|reubica|traslado|trabajo|estudi|campo|lejos|cerca de') THEN 'Reubicación'
+      WHEN REGEXP_CONTAINS({m}, r'comprar|compra|cambi|vivienda|casa|inmueble|apartamento|apto|residencia|domicilio|grande|nuev|vivir|arrend|arriendo|alquil|hogar|propiedad') THEN 'Cambio de casa'
+      ELSE 'Otro'
+    END"""
+
+
+def _motivo_cte() -> str:
+    """CTE `motivo`: 1 fila por nid con texto crudo + categoría.
+
+    Dedup: última interacción (fecha_interaccion, luego fecha_asignacion).
+    """
+    return f"""
+      SELECT
+        nid,
+        motivo_venta_string AS motivo_venta,
+        {_motivo_cat_sql('motivo_venta_string')} AS motivo_cat
+      FROM `{MOTIVO_TABLE}`
+      WHERE motivo_venta_string IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY nid
+        ORDER BY fecha_interaccion DESC, fecha_asignacion DESC
+      ) = 1
+    """
+
+
+# Join estándar de la CTE motivo contra funnel_diarios_col (alias f).
+MOTIVO_JOIN = "LEFT JOIN motivo m ON m.nid = f.nid"
+
+
+def _ctes() -> str:
+    """Prefijo WITH compartido: comerciales + motivo."""
+    return f"WITH comerciales AS ({_comerciales_unnest()}),\n    motivo AS ({_motivo_cte()})"
 
 
 # Label para leads sin prioridad de gestión asignada (valor vacío en BQ).
@@ -74,8 +153,15 @@ def _build_where(
     recurrencia: list[str] | None = None,
     fuentes: list[str] | None = None,
     areas: list[str] | None = None,
+    motivo: list[str] | None = None,
+    campaign: list[str] | None = None,
 ) -> str:
-    """Construye el WHERE con los filtros activos."""
+    """Construye el WHERE con los filtros activos.
+
+    Nota: si se pasa `motivo`, la query debe incluir el CTE `motivo` (vía `_ctes()`)
+    y el `MOTIVO_JOIN` para que el alias `m` exista. `campaign` (utm_campaign) requiere
+    el JOIN a `hubspot.deals` (alias `d`), presente en todos los endpoints del funnel.
+    """
     conds = [
         f"DATE(f.fecha) >= '{fecha_desde}'",
         f"DATE(f.fecha) <= '{fecha_hasta}'",
@@ -97,6 +183,10 @@ def _build_where(
         conds.append(f"COALESCE(f.fuente, '') IN ({_quote_list(fuentes)})")
     if areas:
         conds.append(f"COALESCE(f.area_metropolitana, '') IN ({_quote_list(areas)})")
+    if motivo:
+        conds.append(f"COALESCE(m.motivo_cat, '{MOTIVO_SIN}') IN ({_quote_list(motivo)})")
+    if campaign:
+        conds.append(f"TRIM(COALESCE(d.utm_campaign, '')) IN ({_quote_list(campaign)})")
     return "\n  AND ".join(conds)
 
 
@@ -185,7 +275,9 @@ def filters_options(
         COALESCE(NULLIF(d.prioridad_de_gestion_inmo, ''), '')                            AS prioridad_inmo,
         COALESCE(f.flag_recurrecia_gestion, '')                                          AS recurrencia,
         COALESCE(f.fuente, '')                                                           AS fuente,
-        COALESCE(f.area_metropolitana, '')                                               AS area
+        COALESCE(f.area_metropolitana, '')                                               AS area,
+        TRIM(COALESCE(d.utm_campaign, ''))                                               AS campaign,
+        FORMAT_DATE('%Y-%m', DATE(f.fecha))                                              AS mes
       FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
       LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
@@ -202,7 +294,9 @@ def filters_options(
       ARRAY(SELECT DISTINCT prioridad_inmo FROM base WHERE prioridad_inmo != '' ORDER BY prioridad_inmo) AS prioridades_inmo,
       ARRAY(SELECT DISTINCT recurrencia    FROM base WHERE recurrencia    != '' ORDER BY recurrencia)    AS recurrencias,
       ARRAY(SELECT DISTINCT fuente         FROM base WHERE fuente         != '' ORDER BY fuente)         AS fuentes,
-      ARRAY(SELECT DISTINCT area           FROM base WHERE area           != '' ORDER BY area)           AS areas
+      ARRAY(SELECT DISTINCT area           FROM base WHERE area           != '' ORDER BY area)           AS areas,
+      ARRAY(SELECT DISTINCT campaign       FROM base WHERE campaign       != '' ORDER BY campaign)       AS campaigns,
+      ARRAY(SELECT DISTINCT mes            FROM base WHERE mes            != '' ORDER BY mes DESC)       AS meses
     """
     rows = bq.query(sql)
     r = rows[0] if rows else {}
@@ -217,6 +311,12 @@ def filters_options(
         "recurrencias":    clean(r.get("recurrencias")),
         "fuentes":         clean(r.get("fuentes")),
         "areas":           clean(r.get("areas")),
+        "campaigns":       clean(r.get("campaigns")),
+        # Categorías de razón de venta (estáticas — el campo es texto libre que
+        # categorizamos por keywords). 'Sin dato' al final para nids sin motivo.
+        "motivos":         [c["key"] for c in MOTIVO_CATEGORIAS] + [MOTIVO_SIN],
+        # Meses disponibles (YYYY-MM), desc — para la comparación de cohortes.
+        "meses":           [m for m in (r.get("meses") or []) if m],
     })
 
 
@@ -233,16 +333,18 @@ def volumen(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """Devuelve {labels:[...], datasets:[{label, color, data:[...]}]}."""
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
-    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area)
+    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
 
     group_expr, order_expr = _group_expr(granularidad)
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()})
+    {_ctes()}
     SELECT
       {group_expr} AS periodo,
       f.valor      AS etapa,
@@ -250,6 +352,7 @@ def volumen(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {where}
     GROUP BY 1, 2
     ORDER BY {order_expr}
@@ -292,6 +395,8 @@ def kpis(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """MTD del mes actual (días 1..hoy) vs mismos días mes anterior."""
     from datetime import timedelta
@@ -302,10 +407,10 @@ def kpis(
     fin_anterior = inicio_anterior + (hoy - inicio_actual)
 
     def make_where(start: str, end: str) -> str:
-        return _build_where(start, end, equipo, cat_com, cat, recurrencia, fuente, area)
+        return _build_where(start, end, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()})
+    {_ctes()}
     SELECT
       'actual' AS periodo,
       f.valor AS etapa,
@@ -313,6 +418,7 @@ def kpis(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {make_where(inicio_actual.isoformat(), hoy.isoformat())}
     GROUP BY 1, 2
     UNION ALL
@@ -323,6 +429,7 @@ def kpis(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {make_where(inicio_anterior.isoformat(), fin_anterior.isoformat())}
     GROUP BY 1, 2
     """
@@ -382,8 +489,10 @@ def share_cat(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
     prioridad_mm: Annotated[list[str] | None, Query()] = None,
     prioridad_inmo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """Distribución por categoría (A/B/C) en la etapa de Primer asignación.
 
@@ -391,7 +500,7 @@ def share_cat(
     """
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
-    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area)
+    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
     extra = []
     if prioridad_mm:
         extra.append(f"COALESCE(d.prioridad_gestion_market_maker, '') IN ({_quote_list(_map_prioridad(prioridad_mm))})")
@@ -402,7 +511,7 @@ def share_cat(
     group_expr, _ = _group_expr(granularidad)
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()})
+    {_ctes()}
     SELECT
       {group_expr} AS periodo,
       COALESCE(NULLIF(d.prioridad_gestion_market_maker, ''), f.categoria_comercial, 'Sin categoría') AS categoria,
@@ -410,6 +519,7 @@ def share_cat(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {where}
       AND f.valor = 'Primer_asigancion'
     GROUP BY 1, 2
@@ -465,6 +575,90 @@ def share_cat(
     })
 
 
+# ── /share-motivo → distribución por razón de venta (categorizada) ───────────
+@router.get("/share-motivo")
+def share_motivo(
+    granularidad: Annotated[str, Query()] = "mes",
+    fecha_desde: Annotated[str, Query()] = FECHA_INICIO,
+    fecha_hasta: Annotated[str | None, Query()] = None,
+    equipo: Annotated[list[str] | None, Query()] = None,
+    cat_com: Annotated[list[str] | None, Query()] = None,
+    cat: Annotated[list[str] | None, Query()] = None,
+    recurrencia: Annotated[list[str] | None, Query()] = None,
+    fuente: Annotated[list[str] | None, Query()] = None,
+    area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
+):
+    """Distribución por razón de venta (categorizada) en la Primer asignación.
+
+    Mismo universo que /share-cat (nids en 'Primer_asigancion'), pero agrupado por
+    la categoría de motivo_venta_string. Devuelve {donut, bars}.
+    """
+    if not fecha_hasta:
+        fecha_hasta = date.today().isoformat()
+    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
+    group_expr, _ = _group_expr(granularidad)
+
+    sql = f"""
+    {_ctes()}
+    SELECT
+      {group_expr} AS periodo,
+      COALESCE(m.motivo_cat, '{MOTIVO_SIN}') AS categoria,
+      COUNT(DISTINCT f.nid) AS nids
+    FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
+    LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
+    LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
+    WHERE {where}
+      AND f.valor = 'Primer_asigancion'
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+    rows = bq.query(sql)
+    rows = [r for r in rows if r["periodo"] is not None]
+
+    donut: dict[str, int] = {}
+    by_period: dict[str, dict[str, int]] = {}
+    cats_seen: set[str] = set()
+    periodos: set[str] = set()
+    for r in rows:
+        c = r["categoria"] or MOTIVO_SIN
+        cats_seen.add(c)
+        periodos.add(r["periodo"])
+        donut[c] = donut.get(c, 0) + int(r["nids"])
+        by_period.setdefault(r["periodo"], {})[c] = int(r["nids"])
+
+    # Orden estable: el de MOTIVO_CATEGORIAS, luego 'Sin dato' al final.
+    color_by_cat = {c["key"]: c["color"] for c in MOTIVO_CATEGORIAS}
+    color_by_cat[MOTIVO_SIN] = "#cbd5e1"
+    order = [c["key"] for c in MOTIVO_CATEGORIAS] + [MOTIVO_SIN]
+    cats_ordered = [c for c in order if c in cats_seen]
+    periodos_ordered = sorted(periodos)
+
+    donut_values = [donut.get(c, 0) for c in cats_ordered]
+    donut_colors = [color_by_cat.get(c, "#94a3b8") for c in cats_ordered]
+
+    bars_datasets = [{
+        "label": c,
+        "color": color_by_cat.get(c, "#94a3b8"),
+        "data": [by_period.get(p, {}).get(c, 0) for p in periodos_ordered],
+    } for c in cats_ordered]
+
+    return JSONResponse({
+        "donut": {
+            "labels": cats_ordered,
+            "values": donut_values,
+            "colors": donut_colors,
+            "total": sum(donut_values),
+        },
+        "bars": {
+            "labels": periodos_ordered,
+            "datasets": bars_datasets,
+        },
+    })
+
+
 # ── /conv-time → tasa de conversión en el tiempo ────────────────────────────
 @router.get("/conv-time")
 def conv_time(
@@ -479,7 +673,9 @@ def conv_time(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
     prioridad_mm: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """CVR por período: nids(num) / nids(den).
 
@@ -505,7 +701,7 @@ def conv_time(
     use_lead_rows = "Lead (filas)" in num or "Lead (filas)" in den
     funnel_etapas = sorted({x for x in (num + den) if x not in ("Lead", "Lead (filas)")})
 
-    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area)
+    where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
     if prioridad_mm:
         where += f"\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN ({_quote_list(_map_prioridad(prioridad_mm))})"
     group_f, _ = _group_expr(granularidad)
@@ -518,6 +714,7 @@ def conv_time(
         FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
         LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
         LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+        {MOTIVO_JOIN}
         WHERE {where}
           AND f.valor IN ({_quote_list(funnel_etapas)})""")
     if use_lead or use_lead_rows:
@@ -534,6 +731,13 @@ def conv_time(
             lead_conds.append(f"COALESCE(ig.fuente, '') IN ({_quote_list(fuente)})")
         if area:
             lead_conds.append(f"COALESCE(ig.area_metropolitana, '') IN ({_quote_list(area)})")
+        # utm_campaign es del deal: semi-join a los nids con esa campaña. Los leads sin
+        # deb (nid nulo o sin deal) quedan naturalmente fuera cuando hay filtro activo.
+        if campaign:
+            lead_conds.append(
+                f"ig.nid IN (SELECT nid FROM `sellers-main-prod.hubspot.deals` "
+                f"WHERE TRIM(COALESCE(utm_campaign, '')) IN ({_quote_list(campaign)}))"
+            )
         lead_where = ' AND '.join(lead_conds)
         if use_lead:
             # Lead por nid: agrega nid IS NOT NULL (definición oficial) y cuenta DISTINCT nid.
@@ -552,7 +756,7 @@ def conv_time(
     events_sql = "\n        UNION ALL\n".join(event_parts)
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()}),
+    {_ctes()},
     events AS ({events_sql})
     SELECT
       periodo,
@@ -616,6 +820,8 @@ def cosechas(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """Cosechas: matriz cohorte × offset.
 
@@ -652,7 +858,7 @@ def cosechas(
         diff_unit = "WEEK" if granularidad == "semana" else "MONTH"
         offset_expr = f"DATE_DIFF(d.fecha_destino, o.fecha_origen, {diff_unit})"
 
-    where_origen = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area)
+    where_origen = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
 
     # Modo 'funnel': agrupar por (nid, semana/mes del evento) — un nid puede caer en
     # varias cohortes si tuvo el evento en distintos períodos. Matchea /volumen.
@@ -667,6 +873,7 @@ def cosechas(
           FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
           LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
           LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+          {MOTIVO_JOIN}
           WHERE {where_origen}
             AND f.valor = '{origen.replace("'", "''")}'
           GROUP BY 1, 2
@@ -679,6 +886,7 @@ def cosechas(
           FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
           LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
           LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+          {MOTIVO_JOIN}
           WHERE {where_origen}
             AND f.valor = '{origen.replace("'", "''")}'
           GROUP BY f.nid
@@ -686,7 +894,7 @@ def cosechas(
         cohorte_expr = f"FORMAT_DATE({fmt}, DATE_TRUNC(o.fecha_origen, {unit}))"
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()}),
+    {_ctes()},
     {origen_cte},
     destino AS (
       SELECT nid, MIN(DATE(fecha)) AS fecha_destino
@@ -779,6 +987,81 @@ def cosechas(
     })
 
 
+# ── /funnel-compare → funnel cohortado (para comparar A vs B) ────────────────
+@router.get("/funnel-compare")
+def funnel_compare(
+    mes: Annotated[str | None, Query()] = None,   # 'YYYY-MM' — cohorte = 1ra asignación ese mes
+    equipo: Annotated[list[str] | None, Query()] = None,
+    cat_com: Annotated[list[str] | None, Query()] = None,
+    cat: Annotated[list[str] | None, Query()] = None,
+    recurrencia: Annotated[list[str] | None, Query()] = None,
+    fuente: Annotated[list[str] | None, Query()] = None,
+    area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+):
+    """Funnel cohortado (misma semántica que /cosechas, conteo=cohorte): un nid
+    pertenece al mes de su PRIMERA asignación; una etapa se "alcanza" solo si su
+    fecha es ≥ la de asignación. Devuelve etapas con nids, % sobre asignación y
+    % vs etapa de progresión previa.
+    """
+    label = mes if mes else "Todo"
+    where_asig = _build_where(FECHA_INICIO, date.today().isoformat(),
+                              equipos=equipo, cats_com=cat_com, cats=cat,
+                              recurrencia=recurrencia, fuentes=fuente, areas=area, motivo=motivo)
+    cohort_where = f"AND FORMAT_DATE('%Y-%m', fecha_origen) = '{mes}'" if mes else ""
+    stage_keys = [k for k, _, _ in FUNNEL_COMPARE_STAGES]
+
+    sql = f"""
+    {_ctes()},
+    asig AS (
+      SELECT f.nid, MIN(DATE(f.fecha)) AS fecha_origen
+      FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
+      LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
+      LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      {MOTIVO_JOIN}
+      WHERE {where_asig}
+        AND f.valor = 'Primer_asigancion'
+      GROUP BY f.nid
+    ),
+    cohort AS (
+      SELECT nid, fecha_origen FROM asig WHERE TRUE {cohort_where}
+    ),
+    stage_min AS (
+      SELECT f.nid, f.valor AS etapa, MIN(DATE(f.fecha)) AS fecha_etapa
+      FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
+      JOIN cohort co ON co.nid = f.nid
+      WHERE f.valor IN ({_quote_list(stage_keys)})
+      GROUP BY 1, 2
+    ),
+    reached AS (
+      SELECT sm.etapa, COUNT(DISTINCT sm.nid) AS nids
+      FROM stage_min sm
+      JOIN cohort co ON co.nid = sm.nid
+      WHERE sm.fecha_etapa >= co.fecha_origen
+      GROUP BY 1
+    )
+    SELECT etapa, nids FROM reached
+    """
+    rows = bq.query(sql)
+    by_etapa = {r["etapa"]: int(r["nids"]) for r in rows}
+
+    first = by_etapa.get("Primer_asigancion", 0)
+    stages = []
+    prev_n = None
+    for key, lbl, excl in FUNNEL_COMPARE_STAGES:
+        n = by_etapa.get(key, 0)
+        pct_first = (n / first * 100) if first > 0 else 0
+        pct_prev = (n / prev_n * 100) if (prev_n and prev_n > 0) else None
+        stages.append({
+            "key": key, "label": lbl, "exclusion": excl,
+            "nids": n, "pct_first": pct_first, "pct_prev": pct_prev,
+        })
+        if not excl:
+            prev_n = n
+
+    return JSONResponse({"mes": label, "total": first, "stages": stages})
+
+
 # ── /negocios → tabla cohort (1 row per nid) paginada ───────────────────────
 TABLE_ETAPAS_FIELDS = [
     ("fecha_asignacion", "F. asignación", "Primer_asigancion"),
@@ -801,6 +1084,8 @@ def negocios(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
     etapa: Annotated[str | None, Query()] = None,   # fecha_cierre, fecha_visita, etc.
     search: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -817,7 +1102,8 @@ def negocios(
         fecha_hasta = date.today().isoformat()
     where = _build_where(fecha_desde="2020-01-01", fecha_hasta=date.today().isoformat(),
                          equipos=equipo, cats_com=cat_com, cats=cat,
-                         recurrencia=recurrencia, fuentes=fuente, areas=area)
+                         recurrencia=recurrencia, fuentes=fuente, areas=area, motivo=motivo,
+                         campaign=campaign)
     # En este endpoint no filtramos por fecha en el WHERE del SQL — la fecha
     # se aplica luego sobre la columna de etapa elegida (HAVING).
     # Pero _build_where ya pone DATE(f.fecha) >= y <=. Lo "neutralizamos" usando rango amplio.
@@ -845,7 +1131,7 @@ def negocios(
     having_sql = " AND ".join(having_clauses)
 
     base_sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()}),
+    {_ctes()},
     cohort AS (
       SELECT
         CAST(f.nid AS STRING) AS nid,
@@ -854,10 +1140,13 @@ def negocios(
         ANY_VALUE(COALESCE(NULLIF(d.prioridad_gestion_market_maker, ''), f.categoria_comercial, '')) AS categoria,
         ANY_VALUE(COALESCE(f.fuente, ''))                                                            AS fuente,
         ANY_VALUE(COALESCE(f.area_metropolitana, ''))                                                AS area_metropolitana,
+        ANY_VALUE(m.motivo_venta)                                                                    AS motivo_venta,
+        ANY_VALUE(m.motivo_cat)                                                                      AS motivo_cat,
         {select_etapas}
       FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
       LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      {MOTIVO_JOIN}
       WHERE {where}
         {search_clause}
       GROUP BY 1
@@ -872,7 +1161,7 @@ def negocios(
 
     # Para conocer el total exacto (count), una query separada:
     count_sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()}),
+    {_ctes()},
     cohort AS (
       SELECT
         CAST(f.nid AS STRING) AS nid,
@@ -880,6 +1169,7 @@ def negocios(
       FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
       LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      {MOTIVO_JOIN}
       WHERE {where}
         {search_clause}
       GROUP BY 1
@@ -948,6 +1238,8 @@ def metas_real(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
     asume_area: Annotated[bool, Query()] = False,
 ):
     """Reales del ciclo agrupados por (etapa, semana, bucket).
@@ -963,7 +1255,7 @@ def metas_real(
     fecha_desde = semanas[0]["inicio"]
     fecha_hasta = semanas[-1]["fin"]
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat,
-                         recurrencia, fuente, area)
+                         recurrencia, fuente, area, motivo, campaign)
 
     # Fechas de semana → CASE para asignar 'wk'
     week_cases = " ".join([
@@ -1004,7 +1296,7 @@ def metas_real(
     # Conteo por EVENTOS (cada fila = 1 evento, equivalente al legacy):
     # un nid con 2 filas en la misma semana cuenta 2.
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()})
+    {_ctes()}
     SELECT
       f.valor AS etapa_bq,
       (CASE {week_cases} ELSE NULL END) AS wk,
@@ -1013,6 +1305,7 @@ def metas_real(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {where}
       AND f.valor IN ({_quote_list(todas_etapas_bq)})
     GROUP BY 1, 2, 3
@@ -1054,6 +1347,8 @@ def metas_kpi_tendencias(
     recurrencia: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    motivo: Annotated[list[str] | None, Query()] = None,
+    campaign: Annotated[list[str] | None, Query()] = None,
 ):
     """Para cada etapa devuelve serie de N semanas (8) con meta y real.
 
@@ -1093,7 +1388,7 @@ def metas_kpi_tendencias(
     fecha_desde = series_flat[0]["inicio"]
     fecha_hasta = series_flat[-1]["fin"]
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat,
-                         recurrencia, fuente, area)
+                         recurrencia, fuente, area, motivo, campaign)
 
     week_cases = " ".join([
         f"WHEN DATE(f.fecha) BETWEEN '{s['inicio']}' AND '{s['fin']}' THEN '{s['ciclo']}-{s['week']}'"
@@ -1105,7 +1400,7 @@ def metas_kpi_tendencias(
         todas_etapas_bq.extend(metas_mm.META_ETAPA_TO_BQ[et])
 
     sql = f"""
-    WITH comerciales AS ({_comerciales_unnest()})
+    {_ctes()}
     SELECT
       f.valor AS etapa_bq,
       (CASE {week_cases} ELSE NULL END) AS wkey,
@@ -1113,6 +1408,7 @@ def metas_kpi_tendencias(
     FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    {MOTIVO_JOIN}
     WHERE {where}
       AND f.valor IN ({_quote_list(todas_etapas_bq)})
     GROUP BY 1, 2

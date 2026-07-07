@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from webapp import bq, metas_mm, metas_inmo
-from webapp.routers import funnel_mm, funnel_inmo, funnel_combinado, conversion_seller, precios_subsidios
+from webapp.routers import funnel_mm, funnel_mm_mx, funnel_inmo, funnel_inmo_mx, funnel_combinado, funnel_combinado_mx, conversion_seller, precios_subsidios
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,7 +93,10 @@ def cache_clear():
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(funnel_mm.router,          prefix="/funnel/mm",       tags=["funnel-mm"])
+app.include_router(funnel_mm_mx.router,        prefix="/funnel/mm-mx",    tags=["funnel-mm-mx"])
 app.include_router(funnel_inmo.router,        prefix="/funnel/inmo",     tags=["funnel-inmo"])
+app.include_router(funnel_inmo_mx.router,      prefix="/funnel/inmo-mx",  tags=["funnel-inmo-mx"])
 app.include_router(funnel_combinado.router,   prefix="/funnel/combinado", tags=["funnel-combinado"])
+app.include_router(funnel_combinado_mx.router, prefix="/funnel/combinado-mx", tags=["funnel-combinado-mx"])
 app.include_router(conversion_seller.router,  prefix="/conversion/seller", tags=["conversion-seller"])
 app.include_router(precios_subsidios.router,  prefix="/funnel/mm/precios-subsidios", tags=["precios-subsidios"])

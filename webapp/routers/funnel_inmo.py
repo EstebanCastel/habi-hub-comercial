@@ -115,9 +115,16 @@ def _base_cte(fecha_desde: str, fecha_hasta: str, exclude_incidente: bool) -> st
         AND DATE(h.fecha) <= '{fecha_hasta}'
     ),
     asignados AS (
-      SELECT nid, fecha, 'asignados' AS etapa
-      FROM historical_inmo
-      QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY fecha ASC) = 1
+      -- Fuente OFICIAL de asignados Inmo: leads_asignados_inmobiliaria_colombia
+      -- (1 fila por nid = primera asignación). Reemplaza el "primer evento en historical".
+      -- ⚠️ La tabla arranca en 2025-12-01, así que no hay asignados previos a esa fecha.
+      SELECT
+        a.nid,
+        TIMESTAMP(a.fecha_primera_asignacion) AS fecha,
+        'asignados' AS etapa
+      FROM `sellers-main-prod.data_sellers_bo.leads_asignados_inmobiliaria_colombia` a
+      WHERE DATE(a.fecha_primera_asignacion) >= '{fecha_desde}'
+        AND DATE(a.fecha_primera_asignacion) <= '{fecha_hasta}'
     ),
     perfilados AS (
       SELECT nid, fecha, 'perfilados' AS etapa

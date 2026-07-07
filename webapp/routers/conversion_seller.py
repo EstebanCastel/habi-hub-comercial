@@ -226,6 +226,20 @@ PIPELINE_STAGES_INMO = [
 STAGE_ID_CAPTADO_INMO = "1182117633"
 
 
+def _campaign_in(field: str, campaigns: list[str]) -> str:
+    """Cláusula `AND TRIM(field) IN (...)` para filtrar por utm_campaign.
+
+    Devuelve '' si no hay campañas seleccionadas (sin filtro). El match se hace
+    contra `TRIM(...)` porque las opciones (/campaigns) también salen trimmeadas.
+    """
+    if not campaigns:
+        return ""
+    def esc(s: str) -> str:
+        return (s or "").replace("\\", "\\\\").replace("'", "\\'")
+    lst = ", ".join(f"'{esc(c)}'" for c in campaigns)
+    return f"AND TRIM({field}) IN ({lst})"
+
+
 def _cat_letter(s: str) -> str:
     return (s or "").strip().split()[-1].upper() if s else ""
 
@@ -287,12 +301,44 @@ def cycles():
     })
 
 
+# ── /campaigns → opciones de utm_campaign ────────────────────────────────────
+@router.get("/campaigns")
+def campaigns():
+    """Lista de utm_campaign presentes en el universo del tab (asignados MM + Inmo).
+
+    Se acota a los nids que aparecen como asignación (MM: seguimiento_asignacion_ibuyer_co;
+    Inmo: owner-change en historical) dentro de la ventana de ciclos, para que la lista
+    sea relevante a CO y no traiga campañas MX ni deals fuera de scope.
+    """
+    sql = f"""
+    WITH universe AS (
+      SELECT nid FROM `sellers-main-prod.bi_co.seguimiento_asignacion_ibuyer_co`
+      WHERE DATE(fecha_asignacion) BETWEEN '{EARLIEST_ASIG}' AND '{LATEST_CIERRE}'
+      UNION DISTINCT
+      SELECT nid FROM `sellers-main-prod.hubspot.historical`
+      WHERE propiedad = 'hubspot_owner_id'
+        AND DATE(fecha) BETWEEN '{EARLIEST_ASIG}' AND '{LATEST_CIERRE}'
+    )
+    SELECT DISTINCT TRIM(d.utm_campaign) AS campaign
+    FROM `sellers-main-prod.hubspot.deals` d
+    JOIN universe u ON u.nid = d.nid
+    WHERE d.utm_campaign IS NOT NULL AND TRIM(d.utm_campaign) != ''
+    ORDER BY campaign
+    """
+    rows = bq.query(sql)
+    return JSONResponse({"campaigns": [r["campaign"] for r in rows]})
+
+
 # ── /data → rows {mm, inmo} ──────────────────────────────────────────────────
 @router.get("/data")
-def data():
-    """Trae las dos series (MM, Inmo) con todos los ciclos."""
-    mm_rows   = _fetch_mm()
-    inmo_rows = _fetch_inmo()
+def data(campaign: Annotated[list[str] | None, Query()] = None):
+    """Trae las dos series (MM, Inmo) con todos los ciclos.
+
+    `campaign` (repetible) filtra por utm_campaign del deal, aplicado a num y den.
+    """
+    campaigns = [c for c in (campaign or []) if c]
+    mm_rows   = _fetch_mm(campaigns)
+    inmo_rows = _fetch_inmo(campaigns)
 
     def enrich(rows: list[dict], producto: str) -> list[dict]:
         out = []
@@ -327,6 +373,9 @@ def data():
                 "cvr_meta":  meta,
                 "asig_cat":  asig_cat,
                 "num_cat":   num_cat,
+                # Breakdown por prioridad de gestión inmo (solo Inmo; MM = {})
+                "asig_prio": r.get("asig_prio", {}),
+                "num_prio":  r.get("num_prio", {}),
             })
         return out
 
@@ -336,7 +385,7 @@ def data():
     })
 
 
-def _fetch_mm() -> list[dict]:
+def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
     """Throughput MM: asignados (período asig) vs cierres (período cierre).
 
     Asignados (denominador) = PRIMERA asignación al comercial REAL, desde la fuente
@@ -351,12 +400,21 @@ def _fetch_mm() -> list[dict]:
     `hubspot_owner_id_historico` (owner al momento del evento, no el actual), con la
     misma exclusión de blacklist/zonas.
     """
+    campaigns    = campaigns or []
     asig_case    = _cycle_case("s.fecha_asignacion", 1, 2)
     cierre_case  = _cycle_case("f.fecha", 3, 4)
     bots_lst     = ", ".join(f"'{x}'" for x in MM_EXCLUIR_EMAILS)
     fuentes_excl = ", ".join(f"'{x}'" for x in MM_FUENTES_EXCLUIDAS)
     blacklist    = ", ".join(str(x) for x in sorted(set(MM_BLACKLIST_LOTE_IDS)))
     zonas        = ", ".join(str(x) for x in MM_ZONAS_NO_COMPRAMOS)
+    # Filtro utm_campaign: asig ya tiene JOIN a deals (alias d); cierres sale de
+    # funnel_diarios_col sin deals → se agrega un JOIN condicional (alias dcam).
+    asig_campaign_clause = _campaign_in("d.utm_campaign", campaigns)
+    cierre_campaign_join = (
+        "LEFT JOIN `sellers-main-prod.hubspot.deals` dcam ON dcam.nid = f.nid"
+        if campaigns else ""
+    )
+    cierre_campaign_clause = _campaign_in("dcam.utm_campaign", campaigns)
     sql = f"""
     WITH comerciales AS ({_comerciales_unnest()}),
     asig_per_seller AS (
@@ -384,6 +442,7 @@ def _fetch_mm() -> list[dict]:
         AND LOWER(IFNULL(ig.campana_mercadeo, '')) NOT LIKE '%referido%'
         AND IFNULL(ig.lote_id, -1) NOT IN ({blacklist})
         AND IFNULL(ig.zona_mediana_id, -1) NOT IN ({zonas})
+        {asig_campaign_clause}
       GROUP BY 1, 2
       HAVING ciclo IS NOT NULL
     ),
@@ -396,12 +455,14 @@ def _fetch_mm() -> list[dict]:
         f.nid,
         UPPER(TRIM(f.categoria_comercial)) AS cat
       FROM `papyrus-data.habi_wh_bi.funnel_diarios_col` f
+      {cierre_campaign_join}
       WHERE f.valor = 'Cierre - Comprado'
         AND DATE(f.fecha) BETWEEN '{EARLIEST_ASIG}' AND '{LATEST_CIERRE}'
         AND f.hubspot_owner_id_historico IS NOT NULL
         AND f.hubspot_owner_id_historico != ''
         AND LOWER(f.hubspot_owner_id_historico) NOT IN ({bots_lst})
         AND LOWER(f.hubspot_owner_id_historico) NOT LIKE '%@tuhabi.mx'
+        {cierre_campaign_clause}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY {cierre_case}, LOWER(f.hubspot_owner_id_historico), f.nid
         ORDER BY f.fecha DESC
@@ -448,7 +509,7 @@ def _fetch_mm() -> list[dict]:
     return rows
 
 
-def _fetch_inmo() -> list[dict]:
+def _fetch_inmo(campaigns: list[str] | None = None) -> list[dict]:
     """Throughput Inmo: replica el query del Looker oficial de BI.
 
     Replica:
@@ -457,9 +518,14 @@ def _fetch_inmo() -> list[dict]:
            asignaciones_final (INNER JOIN con QUALIFY).
     Una fila por nid: primera asignación dentro del scope de meta más reciente del comercial.
     """
+    campaigns = campaigns or []
     pipeline_list = ", ".join(f'"{s}"' for s in PIPELINE_STAGES_INMO)
     asig_case   = _cycle_case("fa.fecha_primera_asignacion", 1, 2)
     cierre_case = _cycle_case("h.fecha", 3, 4)
+    # Filtro utm_campaign: asignaciones_filtradas ya hace INNER JOIN a deals (hd);
+    # captados hace LEFT JOIN a deals (d). Se aplica en ambos.
+    asig_campaign_clause = _campaign_in("hd.utm_campaign", campaigns)
+    cap_campaign_clause  = _campaign_in("d.utm_campaign", campaigns)
     excluded = _load_excluded_nids()
     exclude_clause = (
         f"AND ag.nid NOT IN ({', '.join(excluded)})" if excluded else ""
@@ -500,20 +566,22 @@ def _fetch_inmo() -> list[dict]:
     ),
     -- Filtro del Looker: excluir nids con prioridad_de_gestion_inmo NULL
     asignaciones_filtradas AS (
-      SELECT af.*
+      SELECT af.*, COALESCE(hd.prioridad_de_gestion_inmo, '') AS prioridad
       FROM asignaciones_final af
       INNER JOIN `sellers-main-prod.hubspot.deals` hd ON af.nid = hd.nid
       WHERE hd.prioridad_de_gestion_inmo IS NOT NULL
+        {asig_campaign_clause}
     ),
     asig_per_seller AS (
       SELECT
         {asig_case} AS ciclo,
         LOWER(fa.comercial_asignado) AS owner_email,
+        fa.prioridad                 AS prioridad,
         ANY_VALUE(fa.Equipo)         AS equipo_src,
         ANY_VALUE(fa.Categoria)      AS categoria_src,
         COUNT(DISTINCT fa.nid)       AS asignados
       FROM asignaciones_filtradas fa
-      GROUP BY 1, 2
+      GROUP BY 1, 2, 3
       HAVING ciclo IS NOT NULL
     ),
     historical_inmo AS (
@@ -527,30 +595,62 @@ def _fetch_inmo() -> list[dict]:
       SELECT
         {cierre_case} AS ciclo,
         LOWER(d.hubspot_owner_id) AS owner_email,
+        COALESCE(d.prioridad_de_gestion_inmo, '') AS prioridad,
         COUNT(DISTINCT h.nid) AS captados
       FROM historical_inmo h
       LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = h.nid
       WHERE h.stage_id = '{STAGE_ID_CAPTADO_INMO}'
         AND {sql_not_in("d.hubspot_owner_id", INMO_EXCLUIR_EMAILS)}
-      GROUP BY 1, 2
+        {cap_campaign_clause}
+      GROUP BY 1, 2, 3
       HAVING ciclo IS NOT NULL AND owner_email IS NOT NULL AND owner_email != ''
     )
     SELECT
       COALESCE(a.ciclo, c.ciclo)             AS ciclo,
       COALESCE(a.owner_email, c.owner_email) AS owner_email,
-      -- Prioridad: comerciales.csv (foto actual con "Inmobiliaria 1" / "2") sobre metas (que tiene "Inmobiliaria" genérico para periodos viejos)
+      COALESCE(a.prioridad, c.prioridad, '') AS prioridad,
+      -- Equipo/Categoría: comerciales.csv (foto actual con "Inmobiliaria 1" / "2") sobre metas (que tiene "Inmobiliaria" genérico para periodos viejos)
       COALESCE(NULLIF(co.equipo, ''), a.equipo_src, '')    AS equipo_csv,
       COALESCE(NULLIF(co.categoria, ''), a.categoria_src, '') AS categoria_csv,
       COALESCE(a.asignados, 0)               AS asignados,
       COALESCE(c.captados,  0)               AS captados_in_cycle
     FROM asig_per_seller a
     FULL OUTER JOIN captados_per_seller c
-      ON a.ciclo = c.ciclo AND a.owner_email = c.owner_email
+      ON a.ciclo = c.ciclo AND a.owner_email = c.owner_email AND a.prioridad = c.prioridad
     LEFT JOIN comerciales co ON co.email = COALESCE(a.owner_email, c.owner_email)
     """
     rows = bq.query(sql)
+    # El query devuelve grano (ciclo, seller, prioridad). Se pivotea a una fila por
+    # (ciclo, seller) con breakdown por prioridad (asig_prio/num_prio) para poder
+    # filtrar por prioridad de gestión inmo en el frontend.
+    agg: dict[tuple[int, str], dict] = {}
     for r in rows:
-        r["ciclo"] = int(r["ciclo"])
-        r["asignados"] = int(r["asignados"])
-        r["captados_in_cycle"] = int(r["captados_in_cycle"])
-    return rows
+        ciclo = int(r["ciclo"])
+        email = r["owner_email"]
+        prio = (r.get("prioridad") or "").strip() or "Sin prioridad"
+        asig = int(r["asignados"])
+        cap = int(r["captados_in_cycle"])
+        key = (ciclo, email)
+        a = agg.get(key)
+        if a is None:
+            a = agg[key] = {
+                "ciclo": ciclo,
+                "owner_email": email,
+                "equipo_csv": r.get("equipo_csv") or "",
+                "categoria_csv": r.get("categoria_csv") or "",
+                "asignados": 0,
+                "captados_in_cycle": 0,
+                "asig_prio": {},
+                "num_prio": {},
+            }
+        a["asignados"] += asig
+        a["captados_in_cycle"] += cap
+        if asig:
+            a["asig_prio"][prio] = a["asig_prio"].get(prio, 0) + asig
+        if cap:
+            a["num_prio"][prio] = a["num_prio"].get(prio, 0) + cap
+        if not a["equipo_csv"] and r.get("equipo_csv"):
+            a["equipo_csv"] = r["equipo_csv"]
+        if not a["categoria_csv"] and r.get("categoria_csv"):
+            a["categoria_csv"] = r["categoria_csv"]
+    return list(agg.values())

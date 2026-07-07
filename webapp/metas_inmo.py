@@ -1,9 +1,9 @@
-"""Modelo de metas Inmo Ciclo 5 (junio 2026) — Escenario A "Refrescado mayo".
+"""Modelo de metas Inmo Ciclo 5 (junio 2026) — Escenario B "Base ciclo 4".
 
 Portado de reports/funnel_inmo/update.py:compute_metas_inmo. Inputs de referencia
-= split de ciudad + CVRs del funnel de MAYO 2026 (mes limpio, sin incidente 7-abr),
-para proyectar las metas de junio. Equivale al Escenario A de
-reports/metas_inmo_ciclo5/build.py (≈412 captaciones).
+= split de ciudad de ABRIL 2026 + CVRs del funnel Mar+Abr 2026 (idéntico al modelo
+ya validado del ciclo 4), para proyectar las metas de junio. Equivale al Escenario B
+de reports/metas_inmo_ciclo5/build.py.
 
 Devuelve {etapa: {bucket: {'ciclo-week': valor}}}.
 bucket ∈ {Total, A, B, C, Inmobiliaria 1, Inmobiliaria 2, Medellín, Cali, Barranquilla}.
@@ -19,22 +19,23 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 BAD_CAPTADOS_CSV = ROOT / "[CO] Corrección Incidente 7 abr Leads Inmo - bquxjob_41c0d194_19d68c1efbf.csv"
 
-# ── Constantes del modelo (Escenario A · referencia mayo 2026) ───────────────
+# ── Constantes del modelo (Escenario B · base ciclo 4 · referencia abril 2026) ─
 LEADS_TOTAL = 6500
-# Asignados por área metropolitana, mayo 2026 ('Valle de Aburrá' → Medellín).
-MAYO_ASIG   = {"Bogotá": 4261, "Medellín": 811, "Barranquilla": 330, "Cali": 519}
+# Asignados por área metropolitana, abril 2026 ('Valle de Aburrá' → Medellín).
+ABRIL_ASIG  = {"Bogotá": 4270, "Medellín": 786, "Barranquilla": 459, "Cali": 400}
 CAT_SHARE   = {"A": 0.0486, "B": 0.2757, "C": 0.6757}
 CAT_CVR     = {"A": 0.25,   "B": 0.09,   "C": 0.046}
 FLAT_CVR_EQ = {"Cali": 0.06, "Barranquilla": 0.067, "Medellín": 0.04}
 
-# CVRs del funnel — mayo 2026 (nids por etapa: asignados=8.946 · perfilados=3.202 ·
-# aprobado=1.312 · ofertado=1.128 · aceptada=659 · captado=427).
+# CVRs del funnel — Mar+Abr 2026 (abril corregido a 453 captaciones; resto del
+# incidente 7-abr excluido). nids por etapa: asignados=12.356 · perfilados=3.459 ·
+# aprobado=2.605 · ofertado=1.609 · aceptada=1.229 · captado=860.
 HISTORICAL_CVRS = {
-    "asig_to_perf":   3202 / 8946,
-    "perf_to_aprob":  1312 / 3202,
-    "aprob_to_ofert": 1128 / 1312,
-    "ofert_to_ace":   659  / 1128,
-    "ace_to_cap":     427  / 659,
+    "asig_to_perf":   3459 / 12356,
+    "perf_to_aprob":  2605 / 3459,
+    "aprob_to_ofert": 1609 / 2605,
+    "ofert_to_ace":   1229 / 1609,
+    "ace_to_cap":     860  / 1229,
 }
 
 TARGET_EQUIPOS = ["Inmobiliaria 1", "Inmobiliaria 2", "Medellín", "Cali", "Barranquilla"]
@@ -83,8 +84,8 @@ def load_metas(comerciales: list[dict]) -> dict:
               if (c.get("categoria","").startswith("Inmobiliaria")) and c.get("equipo") in TARGET_EQUIPOS]
 
     # 2) Leads por ciudad según mix mayo (escenario A)
-    total_hist = sum(MAYO_ASIG.values())
-    ciudad_leads = {c: LEADS_TOTAL * v / total_hist for c, v in MAYO_ASIG.items()}
+    total_hist = sum(ABRIL_ASIG.values())
+    ciudad_leads = {c: LEADS_TOTAL * v / total_hist for c, v in ABRIL_ASIG.items()}
 
     # 3) Personas por equipo y categoría
     n_by_eq_cat = {eq: {"A": 0, "B": 0, "C": 0} for eq in TARGET_EQUIPOS}

@@ -48,18 +48,34 @@
 <body class="h-full font-sans text-slate-800 dark:text-slate-100 antialiased transition-colors">
   <!-- Top bar -->
   <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 backdrop-blur supports-[backdrop-filter]:bg-white/80 supports-[backdrop-filter]:dark:bg-slate-900/80">
-    <div class="max-w-[1700px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-4">
+    <div x-data="countryNav()" class="max-w-[1700px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-4">
       <a href="/" class="flex items-center gap-2 group shrink-0">
         <img src="/static/img/logo.png" alt="Habi" class="w-9 h-9 object-contain shrink-0">
         <span class="font-semibold tracking-tight text-slate-900 dark:text-slate-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition hidden sm:inline">Hub Comercial</span>
       </a>
 
-      <!-- Desktop nav -->
-      <nav class="hidden md:flex items-center gap-1 ml-4 text-sm">
-        <a href="/funnel/mm"         class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel MM</a>
-        <a href="/funnel/inmo"       class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Funnel Inmo</a>
-        <a href="/funnel/combinado"  class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Combinado</a>
-        <a href="/conversion/seller" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">Conversión Seller</a>
+      <!-- Switcher de país -->
+      <div class="flex items-center rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-sm shrink-0">
+        <template x-for="ct in [['CO','🇨🇴 CO'],['MX','🇲🇽 MX']]" :key="ct[0]">
+          <button @click="switchCountry(ct[0])" x-text="ct[1]"
+            :class="country===ct[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'"
+            class="px-2.5 py-1.5 font-medium transition"></button>
+        </template>
+      </div>
+
+      <!-- Desktop nav (links dependen del país activo) -->
+      <nav class="hidden md:flex items-center gap-1 ml-1 text-sm">
+        <template x-for="s in sections" :key="s.key">
+          <a :href="href(s) || '#'"
+             @click="if(!href(s)) $event.preventDefault()"
+             :class="[ isActive(s) ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium' : 'hover:bg-slate-100 dark:hover:bg-slate-800',
+                       !href(s) ? 'opacity-40 cursor-not-allowed' : '' ]"
+             :title="!href(s) ? 'Pronto para México' : ''"
+             class="px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+            <span x-text="s.label"></span>
+            <span x-show="!href(s)" class="text-[9px] uppercase tracking-wide text-slate-400">pronto</span>
+          </a>
+        </template>
       </nav>
 
       <!-- Mobile nav toggle -->
@@ -69,11 +85,15 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
           </svg>
         </button>
-        <div x-show="open" x-transition @click.outside="open=false" class="absolute right-3 top-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-2 min-w-[180px]" style="display:none">
-          <a href="/funnel/mm"         class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel MM</a>
-          <a href="/funnel/inmo"       class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Funnel Inmo</a>
-          <a href="/funnel/combinado"  class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Combinado</a>
-          <a href="/conversion/seller" class="block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Conversión Seller</a>
+        <div x-show="open" x-transition @click.outside="open=false" class="absolute right-3 top-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-2 min-w-[200px]" style="display:none">
+          <template x-for="s in sections" :key="s.key">
+            <a :href="href(s) || '#'" @click="if(!href(s)) $event.preventDefault()"
+               :class="!href(s) ? 'opacity-40 cursor-not-allowed' : ''"
+               class="flex items-center justify-between px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+              <span x-text="s.label"></span>
+              <span x-show="!href(s)" class="text-[9px] uppercase text-slate-400">pronto</span>
+            </a>
+          </template>
         </div>
       </div>
 
@@ -85,6 +105,33 @@
         <span class="text-xs text-slate-400 dark:text-slate-500">Live · BQ</span>
       </div>
     </div>
+
+    <script>
+      function countryNav() {
+        return {
+          country: "CO",
+          sections: [
+            { key: "mm",        label: "Funnel MM",         CO: "/funnel/mm",         MX: "/funnel/mm-mx" },
+            { key: "inmo",      label: "Funnel Inmo",       CO: "/funnel/inmo",       MX: "/funnel/inmo-mx" },
+            { key: "combinado", label: "Combinado",         CO: "/funnel/combinado",  MX: "/funnel/combinado-mx" },
+            { key: "conv",      label: "Conversión Seller", CO: "/conversion/seller", MX: null },
+          ],
+          init() {
+            // País activo = derivado de la URL (las rutas MX terminan en -mx o /mx).
+            const p = location.pathname;
+            this.country = (p.endsWith("-mx") || p.includes("/mx")) ? "MX" : "CO";
+          },
+          href(s) { return s[this.country]; },
+          isActive(s) { return s[this.country] === location.pathname; },
+          switchCountry(c) {
+            if (c === this.country) return;
+            // Navega a la sección actual en el otro país; si no existe, al default.
+            const cur = this.sections.find(s => s[this.country] === location.pathname);
+            location.href = (cur && cur[c]) || (c === "CO" ? "/funnel/mm" : "/funnel/mm-mx");
+          },
+        };
+      }
+    </script>
   </header>
 
   <main class="max-w-[1700px] mx-auto px-4 md:px-6 py-4 md:py-6">
