@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Rechazos y Aprobaciones · {{ app_name }}{% endblock %}
+
+{% block content %}
+<div x-data="rechazos()" data-fecha-desde="{{ fecha_desde }}" data-fecha-hasta="{{ fecha_hasta }}" class="space-y-4">
+  <!-- Header -->
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Rechazos y Aprobaciones</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-xs md:text-sm mt-1">
+        De los negocios que pasan por <em>pre-comité validado</em>: Aprobado General vs Rechazo Comité vs Rechazo Remodelaciones, y las razones de rechazo por mes.
+      </p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button @click="forceRefresh()" :disabled="refreshing"
+        class="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" :class="refreshing && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="refreshing ? 'Actualizando…' : 'Actualizar datos'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
+        <input type="date" x-model="fechaDesde" @change="loadData()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Hasta</label>
+        <input type="date" x-model="fechaHasta" @change="loadData()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Área / Ciudad</label>
+        <div x-data="rechMulti('area', () => areaOptions, () => onAreaChange())" class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[220px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600"> (Todas)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+            <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="text-[11px] text-slate-400 dark:text-slate-500 mt-2">El área/ciudad aplica a toda la sección. El tipo de rechazo (abajo) solo afecta la tabla.</p>
+  </div>
+
+  <!-- Chart: Aprobado vs Rechazos en el tiempo -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-baseline justify-between mb-2 flex-wrap gap-2">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">Aprobación y rechazo en el tiempo</h2>
+      <span class="text-xs text-slate-400 dark:text-slate-500">% share por mes · pasa el mouse para ver el conteo</span>
+    </div>
+    <div class="relative h-[320px] md:h-[380px]">
+      <canvas id="chart-rechazos"></canvas>
+      <div x-show="loading" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabla: razones de rechazo por mes -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100">Razones por mes <span class="text-slate-400 dark:text-slate-500 font-normal text-sm">(% share)</span></h2>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Tipo rechazo</span>
+        <div class="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 text-xs">
+          <template x-for="t in [['comite','Comité'],['remo','Remodelaciones'],['ambos','Ambos']]" :key="t[0]">
+            <button @click="tipoTabla=t[0]"
+              :class="tipoTabla===t[0] ? 'bg-brand-600 text-white' : 'text-slate-500 dark:text-slate-400'"
+              class="px-3 py-1 rounded-md transition" x-text="t[1]"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="relative overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table class="min-w-full text-xs md:text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider">
+          <tr>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800">Tipo</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Razón de rechazo</th>
+            <template x-for="m in tableData.meses" :key="m">
+              <th class="px-3 py-2.5 text-right whitespace-nowrap" x-text="fmtMes(m)"></th>
+            </template>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+          <template x-for="row in tableData.rows" :key="row.tipo + '|' + row.razon">
+            <tr :class="row.level===0 ? 'bg-slate-50 dark:bg-slate-800/40 font-semibold text-slate-900 dark:text-slate-100' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'">
+              <td class="px-3 py-2 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-900" x-text="row.level===0 ? row.tipo : ''"></td>
+              <td class="px-3 py-2 whitespace-nowrap" :class="row.level===1 && 'pl-7 text-slate-600 dark:text-slate-400 font-normal'">
+                <span x-show="row.expandable" class="text-slate-400 dark:text-slate-500 mr-1" x-text="row.expanded ? '▾' : '▸'"></span>
+                <span x-text="row.level===0 ? (row.expandable ? 'Total' : row.tipo) : row.razon"></span>
+              </td>
+              <template x-for="(v, ci) in row.pcts" :key="ci">
+                <td class="px-3 py-2 text-right tabular-nums">
+                  <span x-show="v !== null" x-text="v===null ? '' : v.toFixed(1) + '%'"></span>
+                  <span x-show="v === null" class="text-slate-300 dark:text-slate-600">–</span>
+                </td>
+              </template>
+            </tr>
+          </template>
+          <tr class="border-t-2 border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-slate-100">
+            <td class="px-3 py-2 sticky left-0 bg-white dark:bg-slate-900">Total</td>
+            <td class="px-3 py-2"></td>
+            <template x-for="(v, ci) in tableData.totalRow" :key="ci">
+              <td class="px-3 py-2 text-right tabular-nums" x-text="v===null ? '–' : v.toFixed(1) + '%'"></td>
+            </template>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div x-show="tableData.rows.length === 0" x-cloak class="text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin resultados</div>
+  </div>
+
+  <p class="text-center text-xs text-slate-400 dark:text-slate-500 pt-2 pb-4">
+    Fuente: hubspot_historical + razones de rechazo comité/remodelaciones · caché BQ · Live
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/rechazos.js"></script>
+{% endblock %}

@@ -16,7 +16,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -329,6 +329,47 @@ def campaigns():
     return JSONResponse({"campaigns": [r["campaign"] for r in rows]})
 
 
+# ── Enriquecimiento fila por seller (compartido por /data y /kpis-compare) ───
+def _enrich(rows: list[dict], producto: str) -> list[dict]:
+    out = []
+    for r in rows:
+        equipo = r["equipo_csv"]
+        cat = _cat_letter(r["categoria_csv"])
+        if producto == "mm":
+            meta = _meta_cvr_mm(equipo, cat)
+            num = r["cierres_in_cycle"]
+        else:
+            meta = _meta_cvr_inmo(equipo, cat)
+            num = r["captados_in_cycle"]
+        asig = r["asignados"]
+        cvr = (num / asig) if asig > 0 else None
+        if producto == "mm":
+            # Categoría del LEAD (del query); "SC" = sin categoría
+            asig_cat = {"A": r["asig_a"], "B": r["asig_b"], "C": r["asig_c"], "SC": r["asig_sc"]}
+            num_cat  = {"A": r["cie_a"],  "B": r["cie_b"],  "C": r["cie_c"],  "SC": r["cie_sc"]}
+        else:
+            # Inmo no tiene categoría de lead separada → se atribuye a la del seller
+            k = cat if cat in ("A", "B", "C") else "SC"
+            asig_cat = {"A": 0, "B": 0, "C": 0, "SC": 0}; asig_cat[k] = asig
+            num_cat  = {"A": 0, "B": 0, "C": 0, "SC": 0}; num_cat[k]  = num
+        out.append({
+            "ciclo":     r["ciclo"],
+            "email":     r["owner_email"],
+            "equipo":    equipo,
+            "categoria": cat,
+            "asignados": asig,
+            "num":       num,
+            "cvr":       cvr,
+            "cvr_meta":  meta,
+            "asig_cat":  asig_cat,
+            "num_cat":   num_cat,
+            # Breakdown por prioridad de gestión inmo (solo Inmo; MM = {})
+            "asig_prio": r.get("asig_prio", {}),
+            "num_prio":  r.get("num_prio", {}),
+        })
+    return out
+
+
 # ── /data → rows {mm, inmo} ──────────────────────────────────────────────────
 @router.get("/data")
 def data(campaign: Annotated[list[str] | None, Query()] = None):
@@ -337,55 +378,70 @@ def data(campaign: Annotated[list[str] | None, Query()] = None):
     `campaign` (repetible) filtra por utm_campaign del deal, aplicado a num y den.
     """
     campaigns = [c for c in (campaign or []) if c]
-    mm_rows   = _fetch_mm(campaigns)
-    inmo_rows = _fetch_inmo(campaigns)
-
-    def enrich(rows: list[dict], producto: str) -> list[dict]:
-        out = []
-        for r in rows:
-            equipo = r["equipo_csv"]
-            cat = _cat_letter(r["categoria_csv"])
-            if producto == "mm":
-                meta = _meta_cvr_mm(equipo, cat)
-                num = r["cierres_in_cycle"]
-            else:
-                meta = _meta_cvr_inmo(equipo, cat)
-                num = r["captados_in_cycle"]
-            asig = r["asignados"]
-            cvr = (num / asig) if asig > 0 else None
-            if producto == "mm":
-                # Categoría del LEAD (del query); "SC" = sin categoría
-                asig_cat = {"A": r["asig_a"], "B": r["asig_b"], "C": r["asig_c"], "SC": r["asig_sc"]}
-                num_cat  = {"A": r["cie_a"],  "B": r["cie_b"],  "C": r["cie_c"],  "SC": r["cie_sc"]}
-            else:
-                # Inmo no tiene categoría de lead separada → se atribuye a la del seller
-                k = cat if cat in ("A", "B", "C") else "SC"
-                asig_cat = {"A": 0, "B": 0, "C": 0, "SC": 0}; asig_cat[k] = asig
-                num_cat  = {"A": 0, "B": 0, "C": 0, "SC": 0}; num_cat[k]  = num
-            out.append({
-                "ciclo":     r["ciclo"],
-                "email":     r["owner_email"],
-                "equipo":    equipo,
-                "categoria": cat,
-                "asignados": asig,
-                "num":       num,
-                "cvr":       cvr,
-                "cvr_meta":  meta,
-                "asig_cat":  asig_cat,
-                "num_cat":   num_cat,
-                # Breakdown por prioridad de gestión inmo (solo Inmo; MM = {})
-                "asig_prio": r.get("asig_prio", {}),
-                "num_prio":  r.get("num_prio", {}),
-            })
-        return out
-
     return JSONResponse({
-        "mm":   enrich(mm_rows,   "mm"),
-        "inmo": enrich(inmo_rows, "inmo"),
+        "mm":   _enrich(_fetch_mm(campaigns),   "mm"),
+        "inmo": _enrich(_fetch_inmo(campaigns), "inmo"),
     })
 
 
-def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
+# ── /kpis-compare → comparativo cycle-to-date vs ciclo anterior ──────────────
+@router.get("/kpis-compare")
+def kpis_compare(
+    ciclo: Annotated[int, Query()],
+    producto: Annotated[str, Query()] = "mm",
+    campaign: Annotated[list[str] | None, Query()] = None,
+):
+    """Filas por-seller del ciclo ANTERIOR, truncadas a los MISMOS días
+    transcurridos que el ciclo seleccionado (por ventana: asignación y cierre
+    cuentan sus días por separado, ya que arrancan en fechas distintas).
+
+    El frontend les aplica los mismos filtros de tabla (equipo/categoría/comercial/
+    búsqueda/prioridad/mín. asignados) y agrega, para que la referencia respete los
+    filtros igual que la vista actual.
+    """
+    campaigns = [c for c in (campaign or []) if c]
+    periods = {p[0]: p for p in CYCLE_PERIODS}
+    cur = periods.get(ciclo)
+    prev = periods.get(ciclo - 1)
+    if not cur or not prev:
+        return JSONResponse({"prev_ciclo": None, "prev_rows": []})
+
+    today = date.today()
+    cur_asig_start   = date.fromisoformat(cur[1])
+    cur_cierre_start = date.fromisoformat(cur[3])
+    # Días transcurridos por ventana (clamp ≥ 0). Si el ciclo ya terminó, el cap
+    # de la ventana previa se recorta a su fin → compara ciclo completo vs completo.
+    elapsed_asig   = max((today - cur_asig_start).days, 0)
+    elapsed_cierre = max((today - cur_cierre_start).days, 0)
+
+    prev_asig_start   = date.fromisoformat(prev[1])
+    prev_asig_end     = date.fromisoformat(prev[2])
+    prev_cierre_start = date.fromisoformat(prev[3])
+    prev_cierre_end   = date.fromisoformat(prev[4])
+    prev_asig_cut   = min(prev_asig_start + timedelta(days=elapsed_asig), prev_asig_end)
+    prev_cierre_cut = min(prev_cierre_start + timedelta(days=elapsed_cierre), prev_cierre_end)
+
+    if producto == "mm":
+        raw = _fetch_mm(campaigns, prev_asig_cut.isoformat(), prev_cierre_cut.isoformat())
+    else:
+        raw = _fetch_inmo(campaigns, prev_asig_cut.isoformat(), prev_cierre_cut.isoformat())
+    prev_rows = [r for r in _enrich(raw, producto) if r["ciclo"] == ciclo - 1]
+
+    return JSONResponse({
+        "producto": producto,
+        "ciclo": ciclo,
+        "prev_ciclo": ciclo - 1,
+        "elapsed_asig_days": elapsed_asig,
+        "elapsed_cierre_days": elapsed_cierre,
+        "prev_asig_cut": prev_asig_cut.isoformat(),
+        "prev_cierre_cut": prev_cierre_cut.isoformat(),
+        "prev_rows": prev_rows,
+    })
+
+
+def _fetch_mm(campaigns: list[str] | None = None,
+              asig_cutoff: str | None = None,
+              cierre_cutoff: str | None = None) -> list[dict]:
     """Throughput MM: asignados (período asig) vs cierres (período cierre).
 
     Asignados (denominador) = PRIMERA asignación al comercial REAL, desde la fuente
@@ -415,6 +471,9 @@ def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
         if campaigns else ""
     )
     cierre_campaign_clause = _campaign_in("dcam.utm_campaign", campaigns)
+    # Corte "a la fecha" (para comparativos cycle-to-date): cap el evento a <= cutoff.
+    asig_cutoff_clause   = f"AND DATE(s.fecha_asignacion) <= '{asig_cutoff}'" if asig_cutoff else ""
+    cierre_cutoff_clause = f"AND DATE(f.fecha) <= '{cierre_cutoff}'" if cierre_cutoff else ""
     sql = f"""
     WITH comerciales AS ({_comerciales_unnest()}),
     asig_per_seller AS (
@@ -443,6 +502,7 @@ def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
         AND IFNULL(ig.lote_id, -1) NOT IN ({blacklist})
         AND IFNULL(ig.zona_mediana_id, -1) NOT IN ({zonas})
         {asig_campaign_clause}
+        {asig_cutoff_clause}
       GROUP BY 1, 2
       HAVING ciclo IS NOT NULL
     ),
@@ -463,6 +523,7 @@ def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
         AND LOWER(f.hubspot_owner_id_historico) NOT IN ({bots_lst})
         AND LOWER(f.hubspot_owner_id_historico) NOT LIKE '%@tuhabi.mx'
         {cierre_campaign_clause}
+        {cierre_cutoff_clause}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY {cierre_case}, LOWER(f.hubspot_owner_id_historico), f.nid
         ORDER BY f.fecha DESC
@@ -509,78 +570,54 @@ def _fetch_mm(campaigns: list[str] | None = None) -> list[dict]:
     return rows
 
 
-def _fetch_inmo(campaigns: list[str] | None = None) -> list[dict]:
-    """Throughput Inmo: replica el query del Looker oficial de BI.
+def _fetch_inmo(campaigns: list[str] | None = None,
+                asig_cutoff: str | None = None,
+                cierre_cutoff: str | None = None) -> list[dict]:
+    """Throughput Inmo: Asignados (denominador) + Captados (numerador).
 
-    Replica:
-      WITH asignaciones_generales (owner-change events desde historical),
-           comerciales_activos_inmo (metas_comerciales_co filtrada Inmo),
-           asignaciones_final (INNER JOIN con QUALIFY).
-    Una fila por nid: primera asignación dentro del scope de meta más reciente del comercial.
+    - Asignados: fuente OFICIAL `bi_co.tablero_asignacion_inmo_col` (1 fila/nid, con
+      fecha_primera_asignacion, comercial_asignado, equipo, categoria, prioridad_inmo).
+      Ciclo por fecha_primera_asignacion; excluye bots/buffers, MX y nids sin prioridad.
+    - Captados: eventos dealstage=captado en `historical`, atribuidos al owner del deal.
     """
     campaigns = campaigns or []
     pipeline_list = ", ".join(f'"{s}"' for s in PIPELINE_STAGES_INMO)
-    asig_case   = _cycle_case("fa.fecha_primera_asignacion", 1, 2)
+    asig_case   = _cycle_case("t.fecha_primera_asignacion", 1, 2)
     cierre_case = _cycle_case("h.fecha", 3, 4)
-    # Filtro utm_campaign: asignaciones_filtradas ya hace INNER JOIN a deals (hd);
-    # captados hace LEFT JOIN a deals (d). Se aplica en ambos.
-    asig_campaign_clause = _campaign_in("hd.utm_campaign", campaigns)
-    cap_campaign_clause  = _campaign_in("d.utm_campaign", campaigns)
-    excluded = _load_excluded_nids()
-    exclude_clause = (
-        f"AND ag.nid NOT IN ({', '.join(excluded)})" if excluded else ""
+    bots_inmo   = ", ".join(f"'{e}'" for e in INMO_EXCLUIR_EMAILS)
+    cap_campaign_clause = _campaign_in("d.utm_campaign", campaigns)
+    # Campaña en asignados: el tablero no une deals → semi-join a los nids con esa utm_campaign.
+    asig_campaign_clause = (
+        f"AND t.nid IN (SELECT nid FROM `sellers-main-prod.hubspot.deals` d2 "
+        f"WHERE TRUE {_campaign_in('d2.utm_campaign', campaigns)})"
+        if campaigns else ""
     )
+    # Corte "a la fecha" (comparativos cycle-to-date): cap el evento a <= cutoff.
+    asig_cutoff_clause   = f"AND DATE(t.fecha_primera_asignacion) <= '{asig_cutoff}'" if asig_cutoff else ""
+    cierre_cutoff_clause = f"AND DATE(h.fecha) <= '{cierre_cutoff}'" if cierre_cutoff else ""
 
     sql = f"""
     WITH comerciales AS ({_comerciales_unnest()}),
-    comerciales_activos_inmo AS ({_comerciales_activos_inmo_unnest()}),
-    asignaciones_generales AS (
-      SELECT ag.nid, ag.valor AS comercial, ag.fecha
-      FROM `sellers-main-prod.hubspot.historical` ag
-      WHERE ag.propiedad = 'hubspot_owner_id'
-        AND ag.fecha >= '2025-12-01'
-        AND LOWER(ag.valor) NOT IN ({", ".join(f"'{e}'" for e in INMO_EXCLUIR_EMAILS)})
-        {exclude_clause}
-    ),
-    asignaciones_final AS (
-      SELECT
-        ag.nid,
-        ag.comercial AS comercial_asignado,
-        DATE(ag.fecha) AS fecha_primera_asignacion,
-        ca.Equipo,
-        ca.Categoria,
-        ca.rol
-      FROM asignaciones_generales ag
-      INNER JOIN comerciales_activos_inmo ca
-        ON LOWER(SPLIT(REPLACE(TRIM(ca.comercial_id), '.ext', ''), '@')[OFFSET(0)])
-           = LOWER(SPLIT(REPLACE(TRIM(ag.comercial), '.ext', ''), '@')[OFFSET(0)])
-       AND DATE_DIFF(DATE(ag.fecha), ca.mes_date, MONTH) BETWEEN 0 AND 11
-       AND (
-         CAST(ca.mes AS STRING) NOT IN ('202512', '202601')
-         OR DATE_TRUNC(DATE(ag.fecha), MONTH) IN ('2025-12-01', '2026-01-01')
-       )
-      QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY ag.nid
-        ORDER BY ca.mes_date DESC, ag.fecha ASC
-      ) = 1
-    ),
-    -- Filtro del Looker: excluir nids con prioridad_de_gestion_inmo NULL
-    asignaciones_filtradas AS (
-      SELECT af.*, COALESCE(hd.prioridad_de_gestion_inmo, '') AS prioridad
-      FROM asignaciones_final af
-      INNER JOIN `sellers-main-prod.hubspot.deals` hd ON af.nid = hd.nid
-      WHERE hd.prioridad_de_gestion_inmo IS NOT NULL
-        {asig_campaign_clause}
-    ),
+    -- Asignados (denominador): fuente OFICIAL tablero_asignacion_inmo_col (1 fila/nid).
+    -- Ciclo por fecha_primera_asignacion; excluye bots/buffers y cuentas MX.
+    -- ⚠️ Solo cuenta asignaciones CONSISTENTES (asignacion_consistente = TRUE): el flag
+    -- oficial del tablero (asignación en el mismo mes de la prioridad). Sin él se cuelan
+    -- reasignaciones inconsistentes y el total no cuadra con el reporte comercial.
     asig_per_seller AS (
       SELECT
         {asig_case} AS ciclo,
-        LOWER(fa.comercial_asignado) AS owner_email,
-        fa.prioridad                 AS prioridad,
-        ANY_VALUE(fa.Equipo)         AS equipo_src,
-        ANY_VALUE(fa.Categoria)      AS categoria_src,
-        COUNT(DISTINCT fa.nid)       AS asignados
-      FROM asignaciones_filtradas fa
+        LOWER(t.comercial_asignado)               AS owner_email,
+        COALESCE(t.prioridad_de_gestion_inmo, '') AS prioridad,
+        ANY_VALUE(t.equipo)                       AS equipo_src,
+        ANY_VALUE(t.categoria)                    AS categoria_src,
+        COUNT(DISTINCT t.nid)                     AS asignados
+      FROM `sellers-main-prod.bi_co.tablero_asignacion_inmo_col` t
+      WHERE t.comercial_asignado IS NOT NULL AND t.comercial_asignado != ''
+        AND LOWER(t.comercial_asignado) NOT IN ({bots_inmo})
+        AND LOWER(t.comercial_asignado) NOT LIKE '%@tuhabi.mx'
+        AND t.asignacion_consistente = TRUE
+        {asig_campaign_clause}
+        {asig_cutoff_clause}
       GROUP BY 1, 2, 3
       HAVING ciclo IS NOT NULL
     ),
@@ -590,6 +627,7 @@ def _fetch_inmo(campaigns: list[str] | None = None) -> list[dict]:
       WHERE h.propiedad = 'dealstage'
         AND h.valor IN ({pipeline_list})
         AND DATE(h.fecha) BETWEEN '{EARLIEST_ASIG}' AND '{LATEST_CIERRE}'
+        {cierre_cutoff_clause}
     ),
     captados_per_seller AS (
       SELECT

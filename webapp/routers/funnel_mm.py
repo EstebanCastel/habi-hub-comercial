@@ -68,6 +68,16 @@ def _quote_list(items: list[str]) -> str:
     return ", ".join(f"'{s}'" for s in safe)
 
 
+# Opción centinela en el filtro de utm_campaign para los deals SIN campaña
+# (utm_campaign vacío/NULL). Al filtrar se traduce a '' para matchear el vacío.
+CAMPAIGN_EMPTY_LABEL = "(vacío)"
+
+
+def _campaign_values(campaign: list[str]) -> list[str]:
+    """Mapea el centinela '(vacío)' → '' para el IN de utm_campaign."""
+    return ["" if c == CAMPAIGN_EMPTY_LABEL else c for c in campaign]
+
+
 # ── Razón de venta (motivo_venta_string — texto libre, categorizado por keywords) ──
 # Fuente: 1 fila por nid (dedup por última interacción). El campo es texto libre
 # escrito a mano (~2k variantes), así que se agrupa en categorías por keywords para
@@ -186,7 +196,7 @@ def _build_where(
     if motivo:
         conds.append(f"COALESCE(m.motivo_cat, '{MOTIVO_SIN}') IN ({_quote_list(motivo)})")
     if campaign:
-        conds.append(f"TRIM(COALESCE(d.utm_campaign, '')) IN ({_quote_list(campaign)})")
+        conds.append(f"TRIM(COALESCE(d.utm_campaign, '')) IN ({_quote_list(_campaign_values(campaign))})")
     return "\n  AND ".join(conds)
 
 
@@ -296,12 +306,17 @@ def filters_options(
       ARRAY(SELECT DISTINCT fuente         FROM base WHERE fuente         != '' ORDER BY fuente)         AS fuentes,
       ARRAY(SELECT DISTINCT area           FROM base WHERE area           != '' ORDER BY area)           AS areas,
       ARRAY(SELECT DISTINCT campaign       FROM base WHERE campaign       != '' ORDER BY campaign)       AS campaigns,
+      (SELECT COUNTIF(campaign = '') FROM base)                                                          AS n_empty_campaign,
       ARRAY(SELECT DISTINCT mes            FROM base WHERE mes            != '' ORDER BY mes DESC)       AS meses
     """
     rows = bq.query(sql)
     r = rows[0] if rows else {}
     def clean(arr):
         return sorted([x for x in (arr or []) if x and x not in ("", "Sin equipo", "Sin categoría")])
+    # Opción "(vacío)" al inicio de campañas si hay deals sin utm_campaign en el scope.
+    campaigns_opts = clean(r.get("campaigns"))
+    if int(r.get("n_empty_campaign") or 0) > 0:
+        campaigns_opts = [CAMPAIGN_EMPTY_LABEL] + campaigns_opts
     return JSONResponse({
         "equipos":         clean(r.get("equipos")),
         "cats_com":        clean(r.get("cats_com")),
@@ -311,7 +326,7 @@ def filters_options(
         "recurrencias":    clean(r.get("recurrencias")),
         "fuentes":         clean(r.get("fuentes")),
         "areas":           clean(r.get("areas")),
-        "campaigns":       clean(r.get("campaigns")),
+        "campaigns":       campaigns_opts,
         # Categorías de razón de venta (estáticas — el campo es texto libre que
         # categorizamos por keywords). 'Sin dato' al final para nids sin motivo.
         "motivos":         [c["key"] for c in MOTIVO_CATEGORIAS] + [MOTIVO_SIN],
@@ -736,7 +751,7 @@ def conv_time(
         if campaign:
             lead_conds.append(
                 f"ig.nid IN (SELECT nid FROM `sellers-main-prod.hubspot.deals` "
-                f"WHERE TRIM(COALESCE(utm_campaign, '')) IN ({_quote_list(campaign)}))"
+                f"WHERE TRIM(COALESCE(utm_campaign, '')) IN ({_quote_list(_campaign_values(campaign))}))"
             )
         lead_where = ' AND '.join(lead_conds)
         if use_lead:

@@ -14,6 +14,7 @@ document.addEventListener("alpine:init", () => {
     convTimeFuente: [],
     convTimeEquipo: [],
     convTimeArea: [],
+    convTimeRecurrencia: [],
     convTimePrioridadMM: [],
     convTimeCampaign: [],
     // Filtros de la comparación de cohortes (A / B)
@@ -301,6 +302,11 @@ function funnelMM() {
       }
       if (t === "precios" && !this.preciosInited) {
         this.initPrecios();
+      }
+      if (t === "rechazos") {
+        // El tab embebe el componente rechazos() (lazy). Avísale que se mostró
+        // para que cargue/renderice el chart al tamaño correcto.
+        this.$nextTick(() => window.dispatchEvent(new CustomEvent("rechazos:show")));
       }
     },
 
@@ -698,6 +704,7 @@ function funnelMM() {
         if ((s.convTimeFuente      || []).length) params.fuente       = s.convTimeFuente;
         if ((s.convTimeEquipo      || []).length) params.equipo       = s.convTimeEquipo;
         if ((s.convTimeArea        || []).length) params.area         = s.convTimeArea;
+        if ((s.convTimeRecurrencia || []).length) params.recurrencia  = s.convTimeRecurrencia;
         if ((s.convTimePrioridadMM || []).length) params.prioridad_mm = s.convTimePrioridadMM;
         if ((s.convTimeCampaign    || []).length) params.campaign     = s.convTimeCampaign;
         const r = await fetch(`/funnel/mm/conv-time?${buildQS(params)}`);
@@ -1162,7 +1169,7 @@ function funnelMM() {
 
     resetFilters() {
       ["equipo","cat_com","cat","recurrencia","fuente","area","motivo","campaign",
-       "convTimeFuente","convTimeEquipo","convTimeArea","convTimePrioridadMM","convTimeCampaign"].forEach(k => {
+       "convTimeFuente","convTimeEquipo","convTimeArea","convTimeRecurrencia","convTimePrioridadMM","convTimeCampaign"].forEach(k => {
         Alpine.store("filters")[k] = [];
       });
       document.querySelectorAll("[x-data^='multiSelect']").forEach(el => {

@@ -1,16 +1,18 @@
-"""Modelo de metas Inmo Ciclo 5 (junio 2026) — Escenario B "Base ciclo 4".
+"""Metas Inmo Ciclo 6 (Julio 2026) — valores explícitos de la planeación.
 
-Portado de reports/funnel_inmo/update.py:compute_metas_inmo. Inputs de referencia
-= split de ciudad de ABRIL 2026 + CVRs del funnel Mar+Abr 2026 (idéntico al modelo
-ya validado del ciclo 4), para proyectar las metas de junio. Equivale al Escenario B
-de reports/metas_inmo_ciclo5/build.py.
+Antes esto era un modelo calculado (CVR × leads). Ahora las metas vienen dadas
+directo del plan comercial (artifact "Metas Inmo · Ciclo 6", tabla `WEEKLY_METAS`
+con valores SEMANALES por etapa y equipo), así que solo se replican por las 4
+semanas del ciclo. El desglose por categoría A/B/C se omite por ahora (el plan no
+lo trae) → el toggle "Categoría" del tablero no mostrará línea de meta.
 
 Devuelve {etapa: {bucket: {'ciclo-week': valor}}}.
-bucket ∈ {Total, A, B, C, Inmobiliaria 1, Inmobiliaria 2, Medellín, Cali, Barranquilla}.
+bucket ∈ {Total, Inmobiliaria 1, Inmobiliaria 2, Medellín, Cali, Barranquilla}.
 
-⚠️ El modelo emite UN solo ciclo (CICLO_DEFAULT). Al pasar de ciclo hay que
-refrescar CICLO_DEFAULT + los inputs de referencia (split + CVRs), o las metas
-del nuevo ciclo saldrán vacías en el webapp.
+⚠️ El webapp usa el calendario compartido (`comercial_cycles.json`) donde
+Julio = Ciclo 6, y el tablero Inmo auto-selecciona el ciclo por fecha. Por eso
+estas metas se emiten bajo CICLO (=6), aunque el plan Inmo las numere "Ciclo 5".
+Al pasar de ciclo hay que refrescar CICLO + N_SEMANAS + WEEKLY_METAS.
 """
 from __future__ import annotations
 
@@ -19,37 +21,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 BAD_CAPTADOS_CSV = ROOT / "[CO] Corrección Incidente 7 abr Leads Inmo - bquxjob_41c0d194_19d68c1efbf.csv"
 
-# ── Constantes del modelo (Escenario B · base ciclo 4 · referencia abril 2026) ─
-LEADS_TOTAL = 6500
-# Asignados por área metropolitana, abril 2026 ('Valle de Aburrá' → Medellín).
-ABRIL_ASIG  = {"Bogotá": 4270, "Medellín": 786, "Barranquilla": 459, "Cali": 400}
-CAT_SHARE   = {"A": 0.0486, "B": 0.2757, "C": 0.6757}
-CAT_CVR     = {"A": 0.25,   "B": 0.09,   "C": 0.046}
-FLAT_CVR_EQ = {"Cali": 0.06, "Barranquilla": 0.067, "Medellín": 0.04}
-
-# CVRs del funnel — Mar+Abr 2026 (abril corregido a 453 captaciones; resto del
-# incidente 7-abr excluido). nids por etapa: asignados=12.356 · perfilados=3.459 ·
-# aprobado=2.605 · ofertado=1.609 · aceptada=1.229 · captado=860.
-HISTORICAL_CVRS = {
-    "asig_to_perf":   3459 / 12356,
-    "perf_to_aprob":  2605 / 3459,
-    "aprob_to_ofert": 1609 / 2605,
-    "ofert_to_ace":   1229 / 1609,
-    "ace_to_cap":     860  / 1229,
-}
+CICLO = 6
+N_SEMANAS = 4
 
 TARGET_EQUIPOS = ["Inmobiliaria 1", "Inmobiliaria 2", "Medellín", "Cali", "Barranquilla"]
-EQUIPO_CIUDAD  = {
-    "Inmobiliaria 1": "Bogotá", "Inmobiliaria 2": "Bogotá",
-    "Medellín": "Medellín", "Cali": "Cali", "Barranquilla": "Barranquilla",
-}
-
-CICLO_DEFAULT = 5
-N_SEMANAS_DEFAULT = 4
 
 ETAPAS_ORDER = ["Asignados", "Perfilados", "Aprobados", "Ofertados", "Aceptadas", "Captados"]
 
-# Mapeo etapa (display) → stage key del historical
+# Mapeo etapa (display) → stage key del historical / base_cte
 META_ETAPA_TO_BQ = {
     "Asignados":  ["asignados"],
     "Perfilados": ["perfilados"],
@@ -59,112 +38,50 @@ META_ETAPA_TO_BQ = {
     "Captados":   ["captado"],
 }
 
-
-def _cat_letter(categoria: str) -> str:
-    return (categoria or "").strip().split()[-1].upper()
+# ── Metas SEMANALES Ciclo 6 (Julio 2026) ─────────────────────────────────────
+# Valores por semana (idénticos las 4 semanas). Total ciclo = valor × 4.
+WEEKLY_METAS: dict[str, dict[str, int]] = {
+    "Asignados":  {"Total": 1500, "Inmobiliaria 1": 557, "Inmobiliaria 2": 556,
+                   "Medellín": 147, "Cali": 118, "Barranquilla": 121},
+    "Perfilados": {"Total": 856,  "Inmobiliaria 1": 293, "Inmobiliaria 2": 292,
+                   "Medellín": 137, "Cali": 67,  "Barranquilla": 67},
+    "Aprobados":  {"Total": 333,  "Inmobiliaria 1": 120, "Inmobiliaria 2": 119,
+                   "Medellín": 51,  "Cali": 22,  "Barranquilla": 20},
+    "Ofertados":  {"Total": 309,  "Inmobiliaria 1": 118, "Inmobiliaria 2": 118,
+                   "Medellín": 26,  "Cali": 24,  "Barranquilla": 23},
+    "Aceptadas":  {"Total": 173,  "Inmobiliaria 1": 64,  "Inmobiliaria 2": 64,
+                   "Medellín": 17,  "Cali": 13,  "Barranquilla": 15},
+    "Captados":   {"Total": 98,   "Inmobiliaria 1": 38,  "Inmobiliaria 2": 39,
+                   "Medellín": 6,   "Cali": 7,   "Barranquilla": 8},
+}
 
 
 _cached: dict | None = None
 
 
 def reset_cache() -> None:
-    """Invalida la caché de metas Inmo (modelo calculado) para forzar recálculo."""
+    """Invalida la caché de metas Inmo para forzar recálculo."""
     global _cached
     _cached = None
 
 
-def load_metas(comerciales: list[dict]) -> dict:
-    """Calcula metas semanales por etapa para Ciclo 4. Recibe la lista de comerciales del CSV."""
+def load_metas(comerciales: list[dict] | None = None) -> dict:
+    """Devuelve {etapa: {bucket: {'ciclo-week': valor}}} para el Ciclo 6.
+
+    `comerciales` se ignora (se mantiene por compatibilidad con los callers).
+    """
     global _cached
     if _cached is not None:
         return _cached
 
-    # 1) Inmo people del CSV (categoría empieza con "Inmobiliaria" y equipo target)
-    people = [c for c in comerciales
-              if (c.get("categoria","").startswith("Inmobiliaria")) and c.get("equipo") in TARGET_EQUIPOS]
-
-    # 2) Leads por ciudad según mix mayo (escenario A)
-    total_hist = sum(ABRIL_ASIG.values())
-    ciudad_leads = {c: LEADS_TOTAL * v / total_hist for c, v in ABRIL_ASIG.items()}
-
-    # 3) Personas por equipo y categoría
-    n_by_eq_cat = {eq: {"A": 0, "B": 0, "C": 0} for eq in TARGET_EQUIPOS}
-    for p in people:
-        c = _cat_letter(p["categoria"])
-        if c in ("A", "B", "C"):
-            n_by_eq_cat[p["equipo"]][c] += 1
-
-    # 4) Leads por (equipo, categoría)
-    leads_by_eq_cat = {eq: {"A": 0.0, "B": 0.0, "C": 0.0} for eq in TARGET_EQUIPOS}
-    # Bogotá: round-robin Inmo1/Inmo2 por categoría
-    bog_leads = ciudad_leads["Bogotá"]
-    for cat in ("A", "B", "C"):
-        cat_leads_bog = bog_leads * CAT_SHARE[cat]
-        n1 = n_by_eq_cat["Inmobiliaria 1"][cat]
-        n2 = n_by_eq_cat["Inmobiliaria 2"][cat]
-        ntot = n1 + n2
-        if ntot == 0:
-            leads_by_eq_cat["Inmobiliaria 1"][cat] = cat_leads_bog / 2
-            leads_by_eq_cat["Inmobiliaria 2"][cat] = cat_leads_bog / 2
-        else:
-            leads_by_eq_cat["Inmobiliaria 1"][cat] = cat_leads_bog * n1 / ntot
-            leads_by_eq_cat["Inmobiliaria 2"][cat] = cat_leads_bog * n2 / ntot
-    # Otras ciudades: mix global
-    for eq in ["Cali", "Barranquilla", "Medellín"]:
-        cl = ciudad_leads[EQUIPO_CIUDAD[eq]]
-        for cat in ("A", "B", "C"):
-            leads_by_eq_cat[eq][cat] = cl * CAT_SHARE[cat]
-
-    leads_by_eq  = {eq: sum(leads_by_eq_cat[eq].values()) for eq in TARGET_EQUIPOS}
-    leads_by_cat = {c: sum(leads_by_eq_cat[eq][c] for eq in TARGET_EQUIPOS) for c in ("A", "B", "C")}
-
-    # 5) Captaciones por (eq, cat) usando CVR flat por equipo o por categoría
-    captaciones_by_eq: dict[str, float] = {}
-    captaciones_by_cat: dict[str, float] = {"A": 0.0, "B": 0.0, "C": 0.0}
-    for eq in TARGET_EQUIPOS:
-        flat = FLAT_CVR_EQ.get(eq)
-        total = 0.0
-        for cat in ("A", "B", "C"):
-            cvr = flat if flat is not None else CAT_CVR[cat]
-            cap = leads_by_eq_cat[eq][cat] * cvr
-            total += cap
-            captaciones_by_cat[cat] += cap
-        captaciones_by_eq[eq] = total
-
-    # 6) Factor de chain (etapa intermedia)
-    h = HISTORICAL_CVRS
-    factor = {
-        "Asignados":  1.0,
-        "Perfilados": h["asig_to_perf"],
-        "Aprobados":  h["asig_to_perf"] * h["perf_to_aprob"],
-        "Ofertados":  h["asig_to_perf"] * h["perf_to_aprob"] * h["aprob_to_ofert"],
-        "Aceptadas":  h["asig_to_perf"] * h["perf_to_aprob"] * h["aprob_to_ofert"] * h["ofert_to_ace"],
-    }
-
     metas: dict = {}
-    nw, ciclo = N_SEMANAS_DEFAULT, CICLO_DEFAULT
+    week_keys = [f"{CICLO}-{w}" for w in range(1, N_SEMANAS + 1)]
 
-    def put(etapa: str, bucket: str, total_value: float) -> None:
-        weekly = total_value / nw
-        metas.setdefault(etapa, {}).setdefault(bucket, {})
-        for w in range(1, nw + 1):
-            metas[etapa][bucket][f"{ciclo}-{w}"] = round(weekly, 2)
-
-    # Etapas derivadas de Asignados con factor
-    for etapa, f in factor.items():
-        put(etapa, "Total", LEADS_TOTAL * f)
-        for eq in TARGET_EQUIPOS:
-            put(etapa, eq, leads_by_eq[eq] * f)
-        for cat in ("A", "B", "C"):
-            put(etapa, cat, leads_by_cat[cat] * f)
-
-    # Captados: usa CVR ajustado (no chain)
-    total_cap = sum(captaciones_by_eq.values())
-    put("Captados", "Total", total_cap)
-    for eq in TARGET_EQUIPOS:
-        put("Captados", eq, captaciones_by_eq[eq])
-    for cat in ("A", "B", "C"):
-        put("Captados", cat, captaciones_by_cat[cat])
+    for etapa, buckets in WEEKLY_METAS.items():
+        metas[etapa] = {}
+        # Total + equipos: valor semanal directo del plan (categorías omitidas)
+        for bucket, val in buckets.items():
+            metas[etapa][bucket] = {wk: val for wk in week_keys}
 
     _cached = metas
     return metas
