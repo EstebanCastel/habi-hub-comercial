@@ -1,7 +1,7 @@
 /**
  * Funnel Combinado MM + Inmo API.
  *
- * GET /api/funnel/combinado?action=filters|etapas|conv-time
+ * GET /api/funnel/combinado?action=filters|etapas|conv-time|cosechas|funnel-compare
  *
  * Ported from webapp/routers/funnel_combinado.py
  */
@@ -40,9 +40,27 @@ const EXCLUDE_ETAPAS = [
   'Captado para inmobiliaria',
 ];
 
+const MOTIVO_TABLE = 'sellers-main-prod.mid_funnel_ibuyer.seller_digital_co_recepcionista_mm';
+
+const MOTIVO_CATEGORIAS = [
+  { key: 'Cambio de casa',       color: '#3b82f6' },
+  { key: 'Reubicación',          color: '#10b981' },
+  { key: 'Inversión',            color: '#7c3aed' },
+  { key: 'Necesidad financiera', color: '#ea580c' },
+  { key: 'Separación',           color: '#db2777' },
+  { key: 'Otro',                 color: '#64748b' },
+];
+
+const MOTIVO_SIN = 'Sin dato';
+
 // ── Funnel combinado constants ───────────────────────────────────────────────
 
 const FECHA_INICIO = '2026-01-01';
+
+// BNPL: campo de hubspot.deals (solo CO). Valores reales: 'Sí' / 'No' (+ vacío).
+const BNPL_FIELD = 'negocio_aplica_para_bnpl_';
+const BNPL_SIN = 'Sin dato';
+const BNPL_OPCIONES = ['Sí', 'No'];
 
 const UPSTREAM_ETAPAS = [
   { key: 'lead',       label: 'Lead (fecha_creacion)',        fecha_col: 'fecha_creacion' },
@@ -80,6 +98,15 @@ const COMBOS: Record<string, { label: string; expand: string[] }> = {
 
 const DEFAULT_NUM = 'combo:transacciones';
 const DEFAULT_DEN = 'combo:asignados';
+
+// Secuencia ordenada del funnel combinado (vista funnel / comparación cohortes).
+const COMBO_FUNNEL = [
+  'combo:asignados',
+  'combo:visitas_perfilados',
+  'combo:aprobados',
+  'combo:aceptados',
+  'combo:transacciones',
+];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -269,10 +296,16 @@ function eventsCtes(
         )`];
     const unions: string[] = [];
     if (neededInmo.includes('inmo:asignados')) {
+      // Fuente OFICIAL de asignados Inmo: leads_asignados_inmobiliaria_colombia
+      // (1 fila por nid = primera asignación). Reemplaza el "primer evento en historical".
+      // ⚠️ La tabla arranca en 2025-12-01.
       unions.push(`
-              SELECT nid, fecha, 'inmo:asignados' AS etapa
-              FROM historical_inmo
-              QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY fecha ASC) = 1
+              SELECT CAST(nid AS STRING) AS nid,
+                     TIMESTAMP(fecha_primera_asignacion) AS fecha,
+                     'inmo:asignados' AS etapa
+              FROM \`sellers-main-prod.data_sellers_bo.leads_asignados_inmobiliaria_colombia\`
+              WHERE DATE(fecha_primera_asignacion) >= '${fechaDesde}'
+                AND DATE(fecha_primera_asignacion) <= '${fechaHasta}'
             `);
     }
     for (const [key, stageId] of Object.entries(stageMap)) {
@@ -346,6 +379,62 @@ function getParamList(sp: URLSearchParams, key: string): string[] | null {
   return vals.length ? vals : null;
 }
 
+// ── Motivo / BNPL helpers ────────────────────────────────────────────────────
+
+function motivoCatSql(field: string): string {
+  const m = `LOWER(TRIM(${field}))`;
+  return `CASE
+      WHEN ${field} IS NULL THEN '${MOTIVO_SIN}'
+      WHEN REGEXP_CONTAINS(${m}, r'deuda|liqui|dinero|efectivo|plata|capital|saldar|solventar|crédito|credito|hipoteca|prestamo|préstamo|financ|gastos|salud|enferm|urgenci') THEN 'Necesidad financiera'
+      WHEN REGEXP_CONTAINS(${m}, r'separaci|separad|divorci|bienes|herenci|sucesi|fallec|viud|falleci') THEN 'Separación'
+      WHEN REGEXP_CONTAINS(${m}, r'inversi|invertir|negocio|oportunidad|reinvers|rentab|proyecto|renta') THEN 'Inversión'
+      WHEN REGEXP_CONTAINS(${m}, r'ciudad|viaje|traslad|me voy|me mudo|mudar|mudan|exterior|país|pais|fuera|extranjer|emigr|reubica|traslado|trabajo|estudi|campo|lejos|cerca de') THEN 'Reubicación'
+      WHEN REGEXP_CONTAINS(${m}, r'comprar|compra|cambi|vivienda|casa|inmueble|apartamento|apto|residencia|domicilio|grande|nuev|vivir|arrend|arriendo|alquil|hogar|propiedad') THEN 'Cambio de casa'
+      ELSE 'Otro'
+    END`;
+}
+
+function motivoCte(): string {
+  return `
+      SELECT
+        nid,
+        motivo_venta_string AS motivo_venta,
+        ${motivoCatSql('motivo_venta_string')} AS motivo_cat
+      FROM \`${MOTIVO_TABLE}\`
+      WHERE motivo_venta_string IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY nid
+        ORDER BY fecha_interaccion DESC, fecha_asignacion DESC
+      ) = 1
+    `;
+}
+
+/** Returns [cte, join, cond] for filtering by razón de venta (recepcionista MM). Empty strings if no filter. */
+function motivoExtra(motivo: string[] | null): [string, string, string] {
+  if (!motivo?.length) return ['', '', ''];
+  const cte = `,\n    motivo AS (${motivoCte()})`;
+  const join = 'LEFT JOIN motivo m ON CAST(m.nid AS STRING) = e.nid';
+  const cond = `\n  AND COALESCE(m.motivo_cat, '${MOTIVO_SIN}') IN (${quoteList(motivo)})`;
+  return [cte, join, cond];
+}
+
+/** Returns [cte, join, cond] for filtering by 'aplica para BNPL' (hubspot.deals, solo CO). */
+function bnplExtra(bnpl: string[] | null): [string, string, string] {
+  if (!bnpl?.length) return ['', '', ''];
+  const cte = `,\n    bnpl_deals AS (SELECT CAST(nid AS STRING) AS nid, ${BNPL_FIELD} AS bnpl FROM \`sellers-main-prod.hubspot.deals\` QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY nid) = 1)`;
+  const join = 'LEFT JOIN bnpl_deals bn ON bn.nid = e.nid';
+  const cond = `\n  AND COALESCE(NULLIF(bn.bnpl, ''), '${BNPL_SIN}') IN (${quoteList(bnpl)})`;
+  return [cte, join, cond];
+}
+
+function labelFor(key: string): string {
+  if (COMBOS[key]) return COMBOS[key].label;
+  for (const e of [...MM_ETAPAS, ...INMO_ETAPAS, ...UPSTREAM_ETAPAS]) {
+    if (e.key === key) return e.label;
+  }
+  return key;
+}
+
 // ── Action: filters ──────────────────────────────────────────────────────────
 
 async function handleFilters(sp: URLSearchParams) {
@@ -358,13 +447,17 @@ async function handleFilters(sp: URLSearchParams) {
     WITH comerciales AS (${comercialesUnnest()}),${ctes}
     SELECT
       ARRAY(SELECT DISTINCT equipo FROM events WHERE equipo NOT IN ('', 'Sin equipo') ORDER BY equipo) AS equipos,
-      ARRAY(SELECT DISTINCT area   FROM events WHERE area   != '' ORDER BY area)                       AS areas
+      ARRAY(SELECT DISTINCT area   FROM events WHERE area   != '' ORDER BY area)                       AS areas,
+      ARRAY(SELECT DISTINCT FORMAT_DATE('%Y-%m', fecha) FROM events ORDER BY 1 DESC)                   AS meses
   `;
   const rows = await query(sql);
   const r = rows[0] || {};
   return NextResponse.json({
     equipos: ((r.equipos as string[]) || []).filter(x => x).sort(),
     areas:   ((r.areas   as string[]) || []).filter(x => x).sort(),
+    motivos: [...MOTIVO_CATEGORIAS.map(c => c.key), MOTIVO_SIN],
+    meses:   ((r.meses   as string[]) || []).filter(x => x),
+    bnpl:    [...BNPL_OPCIONES, BNPL_SIN],
   });
 }
 
@@ -405,6 +498,8 @@ async function handleConvTime(sp: URLSearchParams) {
   const den = getParam(sp, 'den') || DEFAULT_DEN;
   const equipo = getParamList(sp, 'equipo');
   const area = getParamList(sp, 'area');
+  const motivo = getParamList(sp, 'motivo');
+  const bnpl = getParamList(sp, 'bnpl');
   const excludeIncidente = getParam(sp, 'exclude_incidente') !== 'false';
 
   const numKeys = expandKeys([num]);
@@ -419,16 +514,23 @@ async function handleConvTime(sp: URLSearchParams) {
   const neededUpstream = needed.filter(k => UPSTREAM_KEYS.has(k));
 
   const ctes = eventsCtes(fechaDesde, fechaHasta, neededMm, neededInmo, neededUpstream, excludeIncidente);
-  const where = filterClause(equipo, area);
+  let where = filterClause(equipo, area);
   const gExpr = groupExpr(granularidad, 'e.fecha');
 
+  // Filtros por nid vía join a deals/recepcionista, solo si están activos.
+  const [mCte, mJoin, mCond] = motivoExtra(motivo);
+  const [bCte, bJoin, bCond] = bnplExtra(bnpl);
+  where += mCond + bCond;
+
   const sql = `
-    WITH comerciales AS (${comercialesUnnest()}),${ctes}
+    WITH comerciales AS (${comercialesUnnest()}),${ctes}${mCte}${bCte}
     SELECT
       ${gExpr} AS periodo,
-      COUNT(DISTINCT IF(e.etapa IN (${quoteList(numKeys)}), CONCAT(e.source, ':', e.nid), NULL)) AS num,
-      COUNT(DISTINCT IF(e.etapa IN (${quoteList(denKeys)}), CONCAT(e.source, ':', e.nid), NULL)) AS den
+      COUNT(DISTINCT IF(e.etapa IN (${quoteList(numKeys)}), e.nid, NULL)) AS num,
+      COUNT(DISTINCT IF(e.etapa IN (${quoteList(denKeys)}), e.nid, NULL)) AS den
     FROM events e
+    ${mJoin}
+    ${bJoin}
     WHERE ${where}
     GROUP BY 1
     ORDER BY 1
@@ -442,23 +544,247 @@ async function handleConvTime(sp: URLSearchParams) {
   const totalN = nums.reduce((a, b) => a + b, 0);
   const totalD = dens.reduce((a, b) => a + b, 0);
 
-  function resolveLabel(key: string): string {
-    if (COMBOS[key]) return COMBOS[key].label;
-    for (const e of [...MM_ETAPAS, ...INMO_ETAPAS, ...UPSTREAM_ETAPAS]) {
-      if (e.key === key) return e.label;
-    }
-    return key;
-  }
-
   return NextResponse.json({
     labels,
     num: nums, den: dens, cvr: cvrs,
     total_num: totalN, total_den: totalD,
     total_cvr: totalD > 0 ? (totalN / totalD * 100) : null,
-    num_key: num, num_label: resolveLabel(num),
-    den_key: den, den_label: resolveLabel(den),
+    num_key: num, num_label: labelFor(num),
+    den_key: den, den_label: labelFor(den),
     num_expanded: numKeys, den_expanded: denKeys,
   });
+}
+
+// ── Action: cosechas ─────────────────────────────────────────────────────────
+
+async function handleCosechas(sp: URLSearchParams) {
+  const origen = getParam(sp, 'origen') || 'combo:asignados';
+  const destino = getParam(sp, 'destino') || 'combo:transacciones';
+  const granularidad = getParam(sp, 'granularidad') || 'mes';
+  const bucket = getParam(sp, 'bucket') || 'iso';
+  const conteo = getParam(sp, 'conteo') || 'cohorte';
+  const fechaDesde = getParam(sp, 'fecha_desde') || FECHA_INICIO;
+  const fechaHasta = getParam(sp, 'fecha_hasta') || today();
+  const equipo = getParamList(sp, 'equipo');
+  const area = getParamList(sp, 'area');
+  const motivo = getParamList(sp, 'motivo');
+  const bnpl = getParamList(sp, 'bnpl');
+  const excludeIncidente = getParam(sp, 'exclude_incidente') !== 'false';
+
+  const origenKeys = expandKeys([origen]);
+  const destinoKeys = expandKeys([destino]);
+  if (!origenKeys.length || !destinoKeys.length) {
+    return NextResponse.json({ error: 'origen/destino inválidos' }, { status: 400 });
+  }
+
+  const needed = Array.from(new Set([...origenKeys, ...destinoKeys]));
+  const neededMm = needed.filter(k => k.startsWith('mm:'));
+  const neededInmo = needed.filter(k => k.startsWith('inmo:'));
+  const neededUpstream = needed.filter(k => UPSTREAM_KEYS.has(k));
+  const ctes = eventsCtes(FECHA_INICIO, today(), neededMm, neededInmo, neededUpstream, excludeIncidente);
+
+  const unit = granularidad === 'semana' ? 'WEEK(MONDAY)' : 'MONTH';
+  const fmt = granularidad === 'semana' ? "'%Y-%m-%d'" : "'%Y-%m'";
+  let offsetExpr: string;
+  if (bucket === 'dias') {
+    const dpb = granularidad === 'semana' ? 7 : 30;
+    offsetExpr = `DIV(DATE_DIFF(d.fecha_destino, o.fecha_origen, DAY), ${dpb})`;
+  } else {
+    const diffUnit = granularidad === 'semana' ? 'WEEK' : 'MONTH';
+    offsetExpr = `DATE_DIFF(d.fecha_destino, o.fecha_origen, ${diffUnit})`;
+  }
+
+  let whereO = filterClause(equipo, area);
+  const [mCte, mJoin, mCond] = motivoExtra(motivo);
+  const [bCte, bJoin, bCond] = bnplExtra(bnpl);
+  whereO += mCond + bCond;
+
+  let origenCte: string;
+  let cohorteExpr: string;
+  if (conteo === 'funnel') {
+    origenCte = `
+        origen AS (
+          SELECT e.nid AS entity, DATE_TRUNC(DATE(e.fecha), ${unit}) AS cohorte_date, MIN(e.fecha) AS fecha_origen
+          FROM events e ${mJoin} ${bJoin}
+          WHERE e.etapa IN (${quoteList(origenKeys)}) AND ${whereO}
+            AND DATE(e.fecha) BETWEEN '${fechaDesde}' AND '${fechaHasta}'
+          GROUP BY 1, 2
+        )`;
+    cohorteExpr = `FORMAT_DATE(${fmt}, o.cohorte_date)`;
+  } else {
+    origenCte = `
+        origen AS (
+          SELECT e.nid AS entity, MIN(e.fecha) AS fecha_origen
+          FROM events e ${mJoin} ${bJoin}
+          WHERE e.etapa IN (${quoteList(origenKeys)}) AND ${whereO}
+            AND DATE(e.fecha) BETWEEN '${fechaDesde}' AND '${fechaHasta}'
+          GROUP BY 1
+        )`;
+    cohorteExpr = `FORMAT_DATE(${fmt}, DATE_TRUNC(o.fecha_origen, ${unit}))`;
+  }
+
+  const sql = `
+    WITH comerciales AS (${comercialesUnnest()}),${ctes}${mCte}${bCte},
+    ${origenCte},
+    destino AS (
+      SELECT nid AS entity, MIN(fecha) AS fecha_destino
+      FROM events WHERE etapa IN (${quoteList(destinoKeys)}) GROUP BY 1
+    ),
+    joined AS (
+      SELECT ${cohorteExpr} AS cohorte, ${offsetExpr} AS offset_unit
+      FROM origen o LEFT JOIN destino d ON d.entity = o.entity AND d.fecha_destino >= o.fecha_origen
+    )
+    SELECT cohorte, offset_unit, COUNT(*) AS n FROM joined WHERE cohorte IS NOT NULL GROUP BY 1, 2 ORDER BY 1, 2
+  `;
+  const rows = await query(sql);
+
+  const cohortes: Record<string, Record<string, number>> = {};
+  for (const r of rows) {
+    const c = r.cohorte as string;
+    const off = r.offset_unit != null ? String(r.offset_unit) : '__null__';
+    if (!cohortes[c]) cohortes[c] = {};
+    cohortes[c][off] = Number(r.n);
+  }
+
+  const cohortesOrdered = Object.keys(cohortes).sort();
+  let maxOffset = 0;
+  for (const v of Object.values(cohortes)) {
+    for (const o of Object.keys(v)) {
+      if (o !== '__null__') {
+        const n = parseInt(o);
+        if (n > maxOffset) maxOffset = n;
+      }
+    }
+  }
+
+  const matrix = cohortesOrdered.map(c => {
+    const b = cohortes[c];
+    const total = Object.values(b).reduce((a, x) => a + x, 0);
+    const counts = Array.from({ length: maxOffset + 1 }, (_, i) => b[String(i)] || 0);
+    const noReached = b['__null__'] || 0;
+    const alcanzaron = total - noReached;
+    const pct = counts.map(x => total > 0 ? (x / total * 100) : 0);
+    const share = counts.map(x => alcanzaron > 0 ? (x / alcanzaron * 100) : 0);
+    const cumCounts: number[] = [];
+    let cum = 0;
+    for (const x of counts) { cum += x; cumCounts.push(cum); }
+    const cumPct = cumCounts.map(x => total > 0 ? (x / total * 100) : 0);
+    const cumShare = cumCounts.map(x => alcanzaron > 0 ? (x / alcanzaron * 100) : 0);
+    return {
+      cohorte: c, total, alcanzaron, no_alcanzaron: noReached,
+      counts, pct, share, cum_counts: cumCounts, cum_pct: cumPct, cum_share: cumShare,
+    };
+  });
+
+  const prefix = granularidad === 'semana' ? 'S' : 'M';
+  const offsetLabels = Array.from({ length: maxOffset + 1 }, (_, i) => `${prefix}${i}`);
+  let offsetRanges: string[] | null = null;
+  if (bucket === 'dias') {
+    const step = granularidad === 'semana' ? 7 : 30;
+    offsetRanges = Array.from({ length: maxOffset + 1 }, (_, i) => `${i * step}-${(i + 1) * step - 1}d`);
+  }
+
+  return NextResponse.json({
+    origen, destino, origen_label: labelFor(origen), destino_label: labelFor(destino),
+    granularidad, bucket, conteo,
+    offset_labels: offsetLabels, offset_ranges: offsetRanges, rows: matrix,
+  });
+}
+
+// ── Action: funnel-compare ────────────────────────────────────────────────────
+
+async function handleFunnelCompare(sp: URLSearchParams) {
+  const mes = getParam(sp, 'mes');
+  const equipo = getParamList(sp, 'equipo');
+  const area = getParamList(sp, 'area');
+  const motivo = getParamList(sp, 'motivo');
+  const bnpl = getParamList(sp, 'bnpl');
+  const source = getParam(sp, 'source') || 'both'; // both | mm | inmo
+  const excludeIncidente = getParam(sp, 'exclude_incidente') !== 'false';
+
+  const label = mes || 'Todo';
+  const sourceFilter = (source === 'mm' || source === 'inmo') ? `AND e.source = '${source}'` : '';
+
+  const allKeys: string[] = [];
+  for (const combo of COMBO_FUNNEL) allKeys.push(...expandKeys([combo]));
+  const neededMm = [...new Set(allKeys)].filter(k => k.startsWith('mm:'));
+  const neededInmo = [...new Set(allKeys)].filter(k => k.startsWith('inmo:'));
+  const ctes = eventsCtes(FECHA_INICIO, today(), neededMm, neededInmo, [], excludeIncidente);
+
+  let where = filterClause(equipo, area);
+  const [mCte, mJoin, mCond] = motivoExtra(motivo);
+  const [bCte, bJoin, bCond] = bnplExtra(bnpl);
+  where += mCond + bCond;
+  const cohortWhere = mes ? `AND FORMAT_DATE('%Y-%m', fecha_origen) = '${mes}'` : '';
+  const asigKeys = expandKeys([COMBO_FUNNEL[0]]);
+
+  const MM_BY_KEY: Record<string, typeof MM_ETAPAS[0]> = {};
+  for (const e of MM_ETAPAS) MM_BY_KEY[e.key] = e;
+  const INMO_BY_KEY: Record<string, typeof INMO_ETAPAS[0]> = {};
+  for (const e of INMO_ETAPAS) INMO_BY_KEY[e.key] = e;
+
+  const whenLines: string[] = [];
+  for (const combo of COMBO_FUNNEL) {
+    for (const k of expandKeys([combo])) {
+      whenLines.push(`WHEN '${k}' THEN '${combo}'`);
+    }
+  }
+  const comboCase = `CASE e.etapa ${whenLines.join(' ')} ELSE NULL END`;
+
+  const sql = `
+    WITH comerciales AS (${comercialesUnnest()}),${ctes}${mCte}${bCte},
+    asig AS (
+      SELECT e.nid AS entity, MIN(e.fecha) AS fecha_origen
+      FROM events e ${mJoin} ${bJoin}
+      WHERE e.etapa IN (${quoteList(asigKeys)}) AND ${where} ${sourceFilter}
+      GROUP BY 1
+    ),
+    cohort AS (SELECT entity, fecha_origen FROM asig WHERE TRUE ${cohortWhere}),
+    stage_min AS (
+      SELECT e.nid AS entity, ${comboCase} AS combo, MIN(e.fecha) AS fecha_etapa
+      FROM events e
+      WHERE ${comboCase} IS NOT NULL ${sourceFilter}
+      GROUP BY 1, 2
+    ),
+    reached AS (
+      SELECT sm.combo AS etapa, COUNT(DISTINCT sm.entity) AS nids
+      FROM stage_min sm JOIN cohort co ON co.entity = sm.entity
+      WHERE sm.fecha_etapa >= co.fecha_origen
+      GROUP BY 1
+    )
+    SELECT etapa, nids FROM reached
+  `;
+  const rows = await query(sql);
+  const byCombo: Record<string, number> = {};
+  for (const r of rows) byCombo[r.etapa as string] = Number(r.nids);
+
+  function stageLabel(combo: string): string {
+    if (source === 'mm' || source === 'inmo') {
+      for (const k of COMBOS[combo].expand) {
+        if (k.startsWith(source + ':')) {
+          const e = source === 'mm' ? MM_BY_KEY[k] : INMO_BY_KEY[k];
+          if (e) return e.label;
+        }
+      }
+    }
+    return COMBOS[combo].label;
+  }
+
+  const first = byCombo[COMBO_FUNNEL[0]] || 0;
+  let prevN: number | null = null;
+  const stages = COMBO_FUNNEL.map(combo => {
+    const n = byCombo[combo] || 0;
+    const stage = {
+      key: combo, label: stageLabel(combo), exclusion: false,
+      nids: n,
+      pct_first: first > 0 ? (n / first * 100) : 0,
+      pct_prev: (prevN != null && prevN > 0) ? (n / prevN * 100) : null,
+    };
+    prevN = n;
+    return stage;
+  });
+
+  return NextResponse.json({ mes: label, total: first, stages });
 }
 
 // ── Main GET handler ─────────────────────────────────────────────────────────
@@ -469,12 +795,14 @@ export async function GET(request: NextRequest) {
 
   try {
     switch (action) {
-      case 'filters':   return await handleFilters(sp);
-      case 'etapas':    return handleEtapas();
-      case 'conv-time': return await handleConvTime(sp);
+      case 'filters':        return await handleFilters(sp);
+      case 'etapas':         return handleEtapas();
+      case 'conv-time':      return await handleConvTime(sp);
+      case 'cosechas':       return await handleCosechas(sp);
+      case 'funnel-compare': return await handleFunnelCompare(sp);
       default:
         return NextResponse.json(
-          { error: `Unknown action '${action}'. Valid: filters, etapas, conv-time` },
+          { error: `Unknown action '${action}'. Valid: filters, etapas, conv-time, cosechas, funnel-compare` },
           { status: 400 },
         );
     }

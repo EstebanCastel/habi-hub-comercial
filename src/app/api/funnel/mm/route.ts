@@ -184,6 +184,14 @@ function _quoteList(items: string[]): string {
   return safe.map(s => `'${s}'`).join(', ');
 }
 
+/** SQL AND clause for utm_campaign filter. Returns '' when campaigns is empty. */
+function campaignIn(field: string, campaigns: string[]): string {
+  if (!campaigns.length) return '';
+  const safe = campaigns.map(c => (c || '').replace(/'/g, "''"));
+  const lst = safe.map(s => `'${s}'`).join(', ');
+  return `AND TRIM(${field}) IN (${lst})`;
+}
+
 function _mapPrioridad(vals: string[]): string[] {
   return vals.map(v => (v === SIN_PRIORIDAD_LABEL ? '' : v));
 }
@@ -198,6 +206,7 @@ function _buildWhere(
   fuentes?: string[] | null,
   areas?: string[] | null,
   skipBuffers = false,
+  campaigns?: string[] | null,
 ): string {
   const conds: string[] = [
     `DATE(f.fecha) >= '${fechaDesde}'`,
@@ -222,6 +231,9 @@ function _buildWhere(
   }
   if (areas?.length) {
     conds.push(`COALESCE(f.area_metropolitana, '') IN (${_quoteList(areas)})`);
+  }
+  if (campaigns?.length) {
+    conds.push(`TRIM(COALESCE(d.utm_campaign, '')) IN (${_quoteList(campaigns)})`);
   }
   return conds.join('\n  AND ');
 }
@@ -372,8 +384,9 @@ async function handleVolumen(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const campaign = params.getAll('campaign');
 
-  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
   const [groupExpr, orderExpr] = _groupExpr(granularidad);
 
   const sql = `
@@ -426,6 +439,8 @@ async function handleKpis(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const campaign = params.getAll('campaign');
+  const campaignFilter = campaign.length ? campaign : null;
 
   const hoy = new Date();
   const inicioActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
@@ -440,7 +455,7 @@ async function handleKpis(params: URLSearchParams) {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   const makeWhere = (start: string, end: string) =>
-    _buildWhere(start, end, equipo, catCom, cat, recurrencia, fuente, area);
+    _buildWhere(start, end, equipo, catCom, cat, recurrencia, fuente, area, false, campaignFilter);
 
   const sql = `
     WITH comerciales AS (${_comercialesUnnest()})
@@ -511,8 +526,9 @@ async function handleShareCat(params: URLSearchParams) {
   const area = getList(params, 'area');
   const prioridadMm = getList(params, 'prioridad_mm');
   const prioridadInmo = getList(params, 'prioridad_inmo');
+  const campaign = params.getAll('campaign');
 
-  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
   const extra: string[] = [];
   if (prioridadMm?.length) {
     extra.push(`COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`);
@@ -600,6 +616,7 @@ async function handleConvTime(params: URLSearchParams) {
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
   const prioridadMm = getList(params, 'prioridad_mm');
+  const campaign = params.getAll('campaign');
 
   if (!num) num = ['Cierre - Comprado'];
   if (!den) den = ['Primer_asigancion'];
@@ -618,7 +635,7 @@ async function handleConvTime(params: URLSearchParams) {
   const inclBuffers = getString(params, 'incl_buffers', '') === '1';
   const exclDias = getString(params, 'excl_dias', '') === '1';
 
-  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, inclBuffers);
+  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, inclBuffers, campaign.length ? campaign : null);
   if (prioridadMm?.length) {
     where += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
   }
@@ -650,6 +667,14 @@ async function handleConvTime(params: URLSearchParams) {
     }
     if (area?.length) {
       leadConds.push(`COALESCE(ig.area_metropolitana, '') IN (${_quoteList(area)})`);
+    }
+    // utm_campaign is on the deal: semi-join nids with that campaign.
+    // Leads without a deal (or with no matching campaign) are excluded when the filter is active.
+    if (campaign.length) {
+      leadConds.push(
+        `ig.nid IN (SELECT nid FROM \`sellers-main-prod.hubspot.deals\` ` +
+        `WHERE TRIM(COALESCE(utm_campaign, '')) IN (${_quoteList(campaign)}))`,
+      );
     }
     const leadWhere = leadConds.join(' AND ');
     if (useLead) {
@@ -738,13 +763,14 @@ async function handleNegocios(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const campaign = params.getAll('campaign');
   const etapa = params.get('etapa');
   const search = params.get('search');
   const page = getInt(params, 'page', 1);
   const pageSize = Math.min(getInt(params, 'page_size', 50), 200);
 
   // Wide date range for WHERE, date filtering via HAVING on specific stage column
-  const where = _buildWhere('2020-01-01', today(), equipo, catCom, cat, recurrencia, fuente, area);
+  const where = _buildWhere('2020-01-01', today(), equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
 
   const validFields = new Set(TABLE_ETAPAS_FIELDS.map(([f]) => f));
   const dateField = etapa && validFields.has(etapa) ? etapa : 'fecha_asignacion';
@@ -850,6 +876,7 @@ async function handleCosechas(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const campaign = params.getAll('campaign');
 
   const unit = granularidad === 'semana' ? 'WEEK(MONDAY)' : 'MONTH';
   const fmt = granularidad === 'semana' ? "'%Y-%m-%d'" : "'%Y-%m'";
@@ -863,7 +890,7 @@ async function handleCosechas(params: URLSearchParams) {
     offsetExpr = `DATE_DIFF(d.fecha_destino, o.fecha_origen, ${diffUnit})`;
   }
 
-  const whereOrigen = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  const whereOrigen = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
   const safeOrigen = origen.replace(/'/g, "''");
   const safeDestino = destino.replace(/'/g, "''");
 
@@ -992,6 +1019,19 @@ async function handleCosechas(params: URLSearchParams) {
     offset_ranges: offsetRanges,
     rows: matrix,
   });
+}
+
+async function handleCampaigns() {
+  const sql = `
+    SELECT DISTINCT TRIM(d.utm_campaign) AS campaign
+    FROM \`sellers-main-prod.hubspot.deals\` d
+    JOIN \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f ON f.nid = d.nid
+    WHERE d.utm_campaign IS NOT NULL AND TRIM(d.utm_campaign) != ''
+      AND DATE(f.fecha) >= '${FECHA_INICIO}'
+    ORDER BY campaign
+    `;
+  const rows = await query(sql);
+  return NextResponse.json({ campaigns: rows.map(r => r.campaign as string) });
 }
 
 async function handleMetasConfig() {
@@ -1252,6 +1292,8 @@ export async function GET(request: NextRequest) {
 
   try {
     switch (action) {
+      case 'campaigns':
+        return await handleCampaigns();
       case 'filters':
         return await handleFilters(searchParams);
       case 'etapas':

@@ -219,14 +219,47 @@ function comercialesActivosInmoUnnest(): string {
   return 'SELECT * FROM UNNEST([' + structs.join(', ') + '])';
 }
 
+// ── Campaign filter helper ───────────────────────────────────────────────────
+
+/**
+ * Returns a SQL IN clause for utm_campaign filtering.
+ * Returns 'TRUE' (no-op AND) when campaigns list is empty.
+ * The match is against TRIM(field) to mirror how options come out of /campaigns.
+ */
+function campaignIn(field: string, campaigns: string[]): string {
+  if (!campaigns.length) return 'TRUE';
+  const list = campaigns.map(c => `'${c.replace(/'/g, "\\'")}'`).join(', ');
+  return `${field} IN (${list})`;
+}
+
 // ── Fetch MM data ────────────────────────────────────────────────────────────
-async function fetchMm(): Promise<Record<string, unknown>[]> {
+async function fetchMm(
+  campaigns: string[] = [],
+  asigCutoff?: string,
+  cierreCutoff?: string,
+): Promise<Record<string, unknown>[]> {
   const asigCase = cycleCaseExpr('s.fecha_asignacion', 1, 2);
   const cierreCase = cycleCaseExpr('f.fecha', 3, 4);
   const botsLst = MM_EXCLUIR_EMAILS.map(e => `'${e}'`).join(', ');
   const fuentesExcl = MM_FUENTES_EXCLUIDAS.map(f => `'${f}'`).join(', ');
   const blacklist = Array.from(new Set(MM_BLACKLIST_LOTE_IDS)).sort((a, b) => a - b).join(', ');
   const zonas = MM_ZONAS_NO_COMPRAMOS.join(', ');
+
+  // Campaign filter: asig already has JOIN to deals (alias d); cierres comes from
+  // funnel_diarios_col without deals → add a conditional JOIN (alias dcam).
+  const asigCampaignClause = campaigns.length
+    ? `AND ${campaignIn('TRIM(d.utm_campaign)', campaigns)}`
+    : '';
+  const cierreCampaignJoin = campaigns.length
+    ? 'LEFT JOIN `sellers-main-prod.hubspot.deals` dcam ON dcam.nid = f.nid'
+    : '';
+  const cierreCampaignClause = campaigns.length
+    ? `AND ${campaignIn('TRIM(dcam.utm_campaign)', campaigns)}`
+    : '';
+
+  // Cutoff clauses for cycle-to-date comparisons
+  const asigCutoffClause = asigCutoff ? `AND DATE(s.fecha_asignacion) <= '${asigCutoff}'` : '';
+  const cierreCutoffClause = cierreCutoff ? `AND DATE(f.fecha) <= '${cierreCutoff}'` : '';
 
   const sql = `
     WITH comerciales AS (${comercialesUnnest()}),
@@ -254,6 +287,8 @@ async function fetchMm(): Promise<Record<string, unknown>[]> {
         AND LOWER(IFNULL(ig.campana_mercadeo, '')) NOT LIKE '%referido%'
         AND IFNULL(ig.lote_id, -1) NOT IN (${blacklist})
         AND IFNULL(ig.zona_mediana_id, -1) NOT IN (${zonas})
+        ${asigCampaignClause}
+        ${asigCutoffClause}
       GROUP BY 1, 2
       HAVING ciclo IS NOT NULL
     ),
@@ -264,12 +299,15 @@ async function fetchMm(): Promise<Record<string, unknown>[]> {
         f.nid,
         UPPER(TRIM(f.categoria_comercial)) AS cat
       FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+      ${cierreCampaignJoin}
       WHERE f.valor = 'Cierre - Comprado'
         AND DATE(f.fecha) BETWEEN '${EARLIEST_ASIG}' AND '${LATEST_CIERRE}'
         AND f.hubspot_owner_id_historico IS NOT NULL
         AND f.hubspot_owner_id_historico != ''
         AND LOWER(f.hubspot_owner_id_historico) NOT IN (${botsLst})
         AND LOWER(f.hubspot_owner_id_historico) NOT LIKE '%@tuhabi.mx'
+        ${cierreCampaignClause}
+        ${cierreCutoffClause}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY ${cierreCase}, LOWER(f.hubspot_owner_id_historico), f.nid
         ORDER BY f.fecha DESC
@@ -320,64 +358,52 @@ async function fetchMm(): Promise<Record<string, unknown>[]> {
 }
 
 // ── Fetch Inmo data ──────────────────────────────────────────────────────────
-async function fetchInmo(): Promise<Record<string, unknown>[]> {
+async function fetchInmo(
+  campaigns: string[] = [],
+  asigCutoff?: string,
+  cierreCutoff?: string,
+): Promise<Record<string, unknown>[]> {
   const pipelineList = PIPELINE_STAGES_INMO.map(s => `"${s}"`).join(', ');
-  const asigCase = cycleCaseExpr('fa.fecha_primera_asignacion', 1, 2);
+  const asigCase = cycleCaseExpr('t.fecha_primera_asignacion', 1, 2);
   const cierreCase = cycleCaseExpr('h.fecha', 3, 4);
-  const excluded = loadExcludedNids();
-  const excludeClause = excluded.length
-    ? `AND ag.nid NOT IN (${excluded.join(', ')})`
+  const botsInmo = INMO_EXCLUIR_EMAILS.map(e => `'${e}'`).join(', ');
+
+  // Campaign filter for captados: deals table aliased d
+  const capCampaignClause = campaigns.length
+    ? `AND ${campaignIn('TRIM(d.utm_campaign)', campaigns)}`
     : '';
-  const inmoExclLst = INMO_EXCLUIR_EMAILS.map(e => `'${e}'`).join(', ');
+  // Campaign filter for asignados: tablero doesn't join deals → semi-join via subquery
+  const asigCampaignClause = campaigns.length
+    ? `AND t.nid IN (SELECT nid FROM \`sellers-main-prod.hubspot.deals\` d2 WHERE TRUE AND ${campaignIn('TRIM(d2.utm_campaign)', campaigns)})`
+    : '';
+
+  // Cutoff clauses for cycle-to-date comparisons
+  const asigCutoffClause = asigCutoff ? `AND DATE(t.fecha_primera_asignacion) <= '${asigCutoff}'` : '';
+  const cierreCutoffClause = cierreCutoff ? `AND DATE(h.fecha) <= '${cierreCutoff}'` : '';
 
   const sql = `
     WITH comerciales AS (${comercialesUnnest()}),
-    comerciales_activos_inmo AS (${comercialesActivosInmoUnnest()}),
-    asignaciones_generales AS (
-      SELECT ag.nid, ag.valor AS comercial, ag.fecha
-      FROM \`sellers-main-prod.hubspot.historical\` ag
-      WHERE ag.propiedad = 'hubspot_owner_id'
-        AND ag.fecha >= '2025-12-01'
-        AND LOWER(ag.valor) NOT IN (${inmoExclLst})
-        ${excludeClause}
-    ),
-    asignaciones_final AS (
-      SELECT
-        ag.nid,
-        ag.comercial AS comercial_asignado,
-        DATE(ag.fecha) AS fecha_primera_asignacion,
-        ca.Equipo,
-        ca.Categoria,
-        ca.rol
-      FROM asignaciones_generales ag
-      INNER JOIN comerciales_activos_inmo ca
-        ON LOWER(SPLIT(REPLACE(TRIM(ca.comercial_id), '.ext', ''), '@')[OFFSET(0)])
-           = LOWER(SPLIT(REPLACE(TRIM(ag.comercial), '.ext', ''), '@')[OFFSET(0)])
-       AND DATE_DIFF(DATE(ag.fecha), ca.mes_date, MONTH) BETWEEN 0 AND 11
-       AND (
-         CAST(ca.mes AS STRING) NOT IN ('202512', '202601')
-         OR DATE_TRUNC(DATE(ag.fecha), MONTH) IN ('2025-12-01', '2026-01-01')
-       )
-      QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY ag.nid
-        ORDER BY ca.mes_date DESC, ag.fecha ASC
-      ) = 1
-    ),
-    asignaciones_filtradas AS (
-      SELECT af.*
-      FROM asignaciones_final af
-      INNER JOIN \`sellers-main-prod.hubspot.deals\` hd ON af.nid = hd.nid
-      WHERE hd.prioridad_de_gestion_inmo IS NOT NULL
-    ),
+    -- Asignados (denominador): fuente OFICIAL tablero_asignacion_inmo_col (1 fila/nid).
+    -- Ciclo por fecha_primera_asignacion; excluye bots/buffers y cuentas MX.
+    -- Only counts CONSISTENT assignments (asignacion_consistente = TRUE): the official
+    -- tablero flag (assignment in same month as priority). Without it inconsistent
+    -- reassignments slip in and totals don't match the commercial report.
     asig_per_seller AS (
       SELECT
         ${asigCase} AS ciclo,
-        LOWER(fa.comercial_asignado) AS owner_email,
-        ANY_VALUE(fa.Equipo)         AS equipo_src,
-        ANY_VALUE(fa.Categoria)      AS categoria_src,
-        COUNT(DISTINCT fa.nid)       AS asignados
-      FROM asignaciones_filtradas fa
-      GROUP BY 1, 2
+        LOWER(t.comercial_asignado)               AS owner_email,
+        COALESCE(t.prioridad_de_gestion_inmo, '') AS prioridad,
+        ANY_VALUE(t.equipo)                       AS equipo_src,
+        ANY_VALUE(t.categoria)                    AS categoria_src,
+        COUNT(DISTINCT t.nid)                     AS asignados
+      FROM \`sellers-main-prod.bi_co.tablero_asignacion_inmo_col\` t
+      WHERE t.comercial_asignado IS NOT NULL AND t.comercial_asignado != ''
+        AND LOWER(t.comercial_asignado) NOT IN (${botsInmo})
+        AND LOWER(t.comercial_asignado) NOT LIKE '%@tuhabi.mx'
+        AND t.asignacion_consistente = TRUE
+        ${asigCampaignClause}
+        ${asigCutoffClause}
+      GROUP BY 1, 2, 3
       HAVING ciclo IS NOT NULL
     ),
     historical_inmo AS (
@@ -386,42 +412,79 @@ async function fetchInmo(): Promise<Record<string, unknown>[]> {
       WHERE h.propiedad = 'dealstage'
         AND h.valor IN (${pipelineList})
         AND DATE(h.fecha) BETWEEN '${EARLIEST_ASIG}' AND '${LATEST_CIERRE}'
+        ${cierreCutoffClause}
     ),
     captados_per_seller AS (
       SELECT
         ${cierreCase} AS ciclo,
         LOWER(d.hubspot_owner_id) AS owner_email,
+        COALESCE(d.prioridad_de_gestion_inmo, '') AS prioridad,
         COUNT(DISTINCT h.nid) AS captados
       FROM historical_inmo h
       LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = h.nid
       WHERE h.stage_id = '${STAGE_ID_CAPTADO_INMO}'
         AND ${sqlNotIn('d.hubspot_owner_id', INMO_EXCLUIR_EMAILS)}
-      GROUP BY 1, 2
+        ${capCampaignClause}
+      GROUP BY 1, 2, 3
       HAVING ciclo IS NOT NULL AND owner_email IS NOT NULL AND owner_email != ''
     )
     SELECT
       COALESCE(a.ciclo, c.ciclo)             AS ciclo,
       COALESCE(a.owner_email, c.owner_email) AS owner_email,
-      COALESCE(NULLIF(co.equipo, ''), a.equipo_src, '')    AS equipo_csv,
+      COALESCE(a.prioridad, c.prioridad, '') AS prioridad,
+      -- Equipo/Categoría: comerciales.csv (foto actual) over metas (generic for old periods)
+      COALESCE(NULLIF(co.equipo, ''), a.equipo_src, '')       AS equipo_csv,
       COALESCE(NULLIF(co.categoria, ''), a.categoria_src, '') AS categoria_csv,
       COALESCE(a.asignados, 0)               AS asignados,
       COALESCE(c.captados,  0)               AS captados_in_cycle
     FROM asig_per_seller a
     FULL OUTER JOIN captados_per_seller c
-      ON a.ciclo = c.ciclo AND a.owner_email = c.owner_email
+      ON a.ciclo = c.ciclo AND a.owner_email = c.owner_email AND a.prioridad = c.prioridad
     LEFT JOIN comerciales co ON co.email = COALESCE(a.owner_email, c.owner_email)
   `;
 
   const rows = await query(sql);
+  // Query returns grain (ciclo, seller, prioridad). Pivot to one row per (ciclo, seller)
+  // with breakdown by prioridad (asig_prio/num_prio) for frontend filtering.
+  const agg = new Map<string, Record<string, unknown>>();
   for (const r of rows) {
-    r.ciclo = Number(r.ciclo);
-    r.asignados = Number(r.asignados);
-    r.captados_in_cycle = Number(r.captados_in_cycle);
+    const ciclo = Number(r.ciclo);
+    const email = r.owner_email as string;
+    const prio = ((r.prioridad as string) || '').trim() || 'Sin prioridad';
+    const asig = Number(r.asignados);
+    const cap = Number(r.captados_in_cycle);
+    const key = `${ciclo}::${email}`;
+    let a = agg.get(key);
+    if (!a) {
+      a = {
+        ciclo,
+        owner_email: email,
+        equipo_csv: (r.equipo_csv as string) || '',
+        categoria_csv: (r.categoria_csv as string) || '',
+        asignados: 0,
+        captados_in_cycle: 0,
+        asig_prio: {} as Record<string, number>,
+        num_prio: {} as Record<string, number>,
+      };
+      agg.set(key, a);
+    }
+    a.asignados = (a.asignados as number) + asig;
+    a.captados_in_cycle = (a.captados_in_cycle as number) + cap;
+    if (asig) {
+      const ap = a.asig_prio as Record<string, number>;
+      ap[prio] = (ap[prio] || 0) + asig;
+    }
+    if (cap) {
+      const np = a.num_prio as Record<string, number>;
+      np[prio] = (np[prio] || 0) + cap;
+    }
+    if (!(a.equipo_csv as string) && r.equipo_csv) a.equipo_csv = r.equipo_csv;
+    if (!(a.categoria_csv as string) && r.categoria_csv) a.categoria_csv = r.categoria_csv;
   }
-  return rows;
+  return Array.from(agg.values());
 }
 
-// ── Enrich rows ──────────────────────────────────────────────────────────────
+// ── Enrich rows (shared by /data and /kpis-compare) ─────────────────────────
 interface EnrichedRow {
   ciclo: number;
   email: string;
@@ -433,6 +496,8 @@ interface EnrichedRow {
   cvr_meta: number | null;
   asig_cat: Record<string, number>;
   num_cat: Record<string, number>;
+  asig_prio: Record<string, number>;
+  num_prio: Record<string, number>;
 }
 
 function enrichRows(rows: Record<string, unknown>[], producto: 'mm' | 'inmo'): EnrichedRow[] {
@@ -451,6 +516,7 @@ function enrichRows(rows: Record<string, unknown>[], producto: 'mm' | 'inmo'): E
       asigCat = { A: r.asig_a as number, B: r.asig_b as number, C: r.asig_c as number, SC: r.asig_sc as number };
       numCat = { A: r.cie_a as number, B: r.cie_b as number, C: r.cie_c as number, SC: r.cie_sc as number };
     } else {
+      // Inmo: no separate lead category — attribute to seller's category
       const k = ['A', 'B', 'C'].includes(cat) ? cat : 'SC';
       asigCat = { A: 0, B: 0, C: 0, SC: 0 }; asigCat[k] = asig;
       numCat = { A: 0, B: 0, C: 0, SC: 0 }; numCat[k] = num;
@@ -467,9 +533,132 @@ function enrichRows(rows: Record<string, unknown>[], producto: 'mm' | 'inmo'): E
       cvr_meta: meta,
       asig_cat: asigCat,
       num_cat: numCat,
+      // Breakdown by prioridad_de_gestion_inmo (Inmo only; MM = {})
+      asig_prio: (r.asig_prio as Record<string, number>) || {},
+      num_prio: (r.num_prio as Record<string, number>) || {},
     });
   }
   return out;
+}
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
+
+function handleCycles() {
+  return NextResponse.json({
+    periods: CYCLE_PERIODS.map(p => ({
+      ciclo: p[0],
+      asig_start: p[1],
+      asig_end: p[2],
+      cierre_start: p[3],
+      cierre_end: p[4],
+    })),
+  });
+}
+
+async function handleCampaigns() {
+  // Lists distinct utm_campaign values from the universe of the tab
+  // (MM asig: seguimiento_asignacion_ibuyer_co; Inmo: historical owner-change)
+  // within the cycle window, so the list is relevant to CO and not MX.
+  const sql = `
+    WITH universe AS (
+      SELECT nid FROM \`sellers-main-prod.bi_co.seguimiento_asignacion_ibuyer_co\`
+      WHERE DATE(fecha_asignacion) BETWEEN '${EARLIEST_ASIG}' AND '${LATEST_CIERRE}'
+      UNION DISTINCT
+      SELECT nid FROM \`sellers-main-prod.hubspot.historical\`
+      WHERE propiedad = 'hubspot_owner_id'
+        AND DATE(fecha) BETWEEN '${EARLIEST_ASIG}' AND '${LATEST_CIERRE}'
+    )
+    SELECT DISTINCT TRIM(d.utm_campaign) AS campaign
+    FROM \`sellers-main-prod.hubspot.deals\` d
+    JOIN universe u ON u.nid = d.nid
+    WHERE d.utm_campaign IS NOT NULL AND TRIM(d.utm_campaign) != ''
+    ORDER BY campaign
+  `;
+  const rows = await query(sql);
+  return NextResponse.json({ campaigns: rows.map(r => r.campaign as string) });
+}
+
+async function handleData(searchParams: URLSearchParams) {
+  const campaigns = searchParams.getAll('campaign').filter(Boolean);
+  const [mmRows, inmoRows] = await Promise.all([fetchMm(campaigns), fetchInmo(campaigns)]);
+  return NextResponse.json({
+    mm: enrichRows(mmRows, 'mm'),
+    inmo: enrichRows(inmoRows, 'inmo'),
+  });
+}
+
+async function handleKpisCompare(searchParams: URLSearchParams) {
+  const ciclo = parseInt(searchParams.get('ciclo') || '');
+  const producto = (searchParams.get('producto') || 'mm') as 'mm' | 'inmo';
+  const campaigns = searchParams.getAll('campaign').filter(Boolean);
+
+  if (!ciclo) {
+    return NextResponse.json({ error: 'ciclo param required' }, { status: 400 });
+  }
+
+  const periodsMap = new Map(CYCLE_PERIODS.map(p => [p[0], p]));
+  const cur = periodsMap.get(ciclo);
+  const prev = periodsMap.get(ciclo - 1);
+
+  if (!cur || !prev) {
+    return NextResponse.json({ prev_ciclo: null, prev_rows: [] });
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const curAsigStart = new Date(cur[1]);
+  const curCierreStart = new Date(cur[3]);
+
+  // Days elapsed in each window (clamp >= 0). If the cycle already ended,
+  // the prev window cap gets clipped to its end → full cycle vs full cycle comparison.
+  const elapsedAsig = Math.max(
+    Math.floor((today.getTime() - curAsigStart.getTime()) / 86400000),
+    0,
+  );
+  const elapsedCierre = Math.max(
+    Math.floor((today.getTime() - curCierreStart.getTime()) / 86400000),
+    0,
+  );
+
+  const prevAsigStart = new Date(prev[1]);
+  const prevAsigEnd = new Date(prev[2]);
+  const prevCierreStart = new Date(prev[3]);
+  const prevCierreEnd = new Date(prev[4]);
+
+  // Add elapsed days to previous cycle start, clamped to cycle end
+  const prevAsigCutDate = new Date(Math.min(
+    prevAsigStart.getTime() + elapsedAsig * 86400000,
+    prevAsigEnd.getTime(),
+  ));
+  const prevCierreCutDate = new Date(Math.min(
+    prevCierreStart.getTime() + elapsedCierre * 86400000,
+    prevCierreEnd.getTime(),
+  ));
+
+  const prevAsigCut = prevAsigCutDate.toISOString().slice(0, 10);
+  const prevCierreCut = prevCierreCutDate.toISOString().slice(0, 10);
+
+  let raw: Record<string, unknown>[];
+  if (producto === 'mm') {
+    raw = await fetchMm(campaigns, prevAsigCut, prevCierreCut);
+  } else {
+    raw = await fetchInmo(campaigns, prevAsigCut, prevCierreCut);
+  }
+
+  // Filter to only previous cycle rows
+  const prevRows = enrichRows(raw, producto).filter(r => r.ciclo === ciclo - 1);
+
+  return NextResponse.json({
+    producto,
+    ciclo,
+    prev_ciclo: ciclo - 1,
+    elapsed_asig_days: elapsedAsig,
+    elapsed_cierre_days: elapsedCierre,
+    prev_asig_cut: prevAsigCut,
+    prev_cierre_cut: prevCierreCut,
+    prev_rows: prevRows,
+  });
 }
 
 // ── GET handler ──────────────────────────────────────────────────────────────
@@ -477,25 +666,15 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
 
-  if (action === 'cycles') {
-    return NextResponse.json({
-      periods: CYCLE_PERIODS.map(p => ({
-        ciclo: p[0],
-        asig_start: p[1],
-        asig_end: p[2],
-        cierre_start: p[3],
-        cierre_end: p[4],
-      })),
-    });
+  switch (action) {
+    case 'cycles':    return handleCycles();
+    case 'campaigns': return handleCampaigns();
+    case 'data':      return handleData(searchParams);
+    case 'kpis-compare': return handleKpisCompare(searchParams);
+    default:
+      return NextResponse.json(
+        { error: 'Unknown action. Use ?action=cycles, ?action=campaigns, ?action=data, or ?action=kpis-compare' },
+        { status: 400 },
+      );
   }
-
-  if (action === 'data') {
-    const [mmRows, inmoRows] = await Promise.all([fetchMm(), fetchInmo()]);
-    return NextResponse.json({
-      mm: enrichRows(mmRows, 'mm'),
-      inmo: enrichRows(inmoRows, 'inmo'),
-    });
-  }
-
-  return NextResponse.json({ error: 'Unknown action. Use ?action=cycles or ?action=data' }, { status: 400 });
 }

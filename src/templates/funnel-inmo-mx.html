@@ -1,0 +1,824 @@
+<div x-data="funnelInmoMx()" x-init="init()" class="space-y-5">
+
+  <!-- Header -->
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100">Funnel Inmo · México 🇲🇽</h1>
+      <p class="text-sm text-slate-500 dark:text-slate-400">Captaciones por etapa — fuente <code class="text-xs">seguimiento_inmobiliaria_mex_copia</code></p>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-slate-200 dark:border-slate-800">
+    <div class="flex gap-1">
+      <template x-for="t in [['volumen','Volumen'],['cosechas','Cosechas']]" :key="t[0]">
+        <button @click="switchTab(t[0])"
+          :class="tab===t[0] ? 'border-brand-600 text-brand-600 dark:text-brand-400 dark:border-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+          class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition" x-text="t[1]"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 md:p-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+      <!-- Equipo -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+        <div x-data="multiSelect('equipo', () => filtersOptions.equipos || [], () => refresh())"
+             class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+            <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fuente -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
+        <div x-data="multiSelect('fuente', () => filtersOptions.fuentes || [], () => refresh())"
+             class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+            <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Área -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Área</label>
+        <div x-data="multiSelect('area', () => filtersOptions.areas || [], () => refresh())"
+             class="relative" @click.outside="open=false">
+          <button type="button" @click="open=!open"
+            class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+            <span x-text="btnLabel()" class="truncate"></span>
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+              <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+            </label>
+            <hr class="my-1 border-slate-100 dark:border-slate-700">
+            <template x-for="opt in options()" :key="opt">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                <span x-text="opt"></span>
+              </label>
+            </template>
+            <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Desde -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Desde</label>
+        <input type="date" x-model="fechaDesde" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+
+      <!-- Hasta -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Hasta</label>
+        <input type="date" x-model="fechaHasta" @change="refresh()"
+          class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+
+      <!-- Granularidad -->
+      <div class="flex flex-col gap-1 min-w-0">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
+        <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+          <template x-for="g in [['mes','Mes'],['semana','Sem'],['dia','Día'],['mes_com','Mes com.'],['sem_com','Sem. com.']]" :key="g[0]">
+            <button @click="granularidad=g[0]; refresh()"
+              :class="granularidad===g[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+              class="flex-1 px-2 py-2 transition whitespace-nowrap" x-text="g[1]"></button>
+          </template>
+        </div>
+      </div>
+
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button @click="resetFiltros()" class="text-xs md:text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition">Limpiar filtros</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div id="kpis" class="min-h-[90px]">
+    <div class="text-sm text-slate-400">Cargando KPIs…</div>
+  </div>
+
+  <!-- ─────────── TAB: VOLUMEN ─────────── -->
+  <div x-show="tab==='volumen'" class="space-y-5">
+
+    <!-- Volumen chart -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-3">Volumen por etapa</h2>
+      <div class="relative h-[420px]"><canvas id="chartVolumen"></canvas></div>
+    </div>
+
+    <!-- CVR en el tiempo -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Tasa de conversión en el tiempo</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">CVR = suma(<em>Numerador</em>) ÷ suma(<em>Denominador</em>)</p>
+        </div>
+        <span id="convTotals" class="text-xs text-slate-500 dark:text-slate-400"></span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:max-w-md gap-3 mb-3">
+
+        <!-- convNum multiSelect -->
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Numerador</label>
+          <div x-data="multiSelect('convNum', () => etapasLabels, () => refreshConvTime())"
+               class="relative" @click.outside="open=false">
+            <button type="button" @click="open=!open"
+              class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+              <span x-text="btnLabel()" class="truncate"></span>
+              <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+              <template x-for="opt in options()" :key="opt">
+                <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                  <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                  <span x-text="opt"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- convDen multiSelect -->
+        <div class="flex flex-col gap-1 min-w-0">
+          <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Denominador</label>
+          <div x-data="multiSelect('convDen', () => etapasLabels, () => refreshConvTime())"
+               class="relative" @click.outside="open=false">
+            <button type="button" @click="open=!open"
+              class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+              <span x-text="btnLabel()" class="truncate"></span>
+              <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[240px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+              <template x-for="opt in options()" :key="opt">
+                <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                  <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                  <span x-text="opt"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="relative h-[300px] md:h-[360px]"><canvas id="chartConvTime"></canvas></div>
+    </div>
+
+    <!-- Negocios -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Negocios</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5" id="negociosCount">—</p>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <select x-model="negociosEtapa" @change="negociosPage=1; refreshNegocios()"
+            class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-xs py-1.5 px-2 text-slate-700 dark:text-slate-200">
+            <template x-for="e in negociosEtapas" :key="e.field">
+              <option :value="e.field" x-text="'Llegó a: '+e.label"></option>
+            </template>
+          </select>
+          <input type="text" x-model="negociosSearch" @input.debounce.400ms="negociosPage=1; refreshNegocios()"
+            placeholder="Buscar nid…"
+            class="rounded-lg border border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-xs py-1.5 px-2 w-32 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider">
+            <tr>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">nid</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Equipo</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Fuente</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Área</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Asignado</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Contacto</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Oferta acept.</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Contrato</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Firmas</th>
+              <th class="px-3 py-2.5 text-left whitespace-nowrap">Captación</th>
+            </tr>
+          </thead>
+          <tbody id="negociosTbody" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+        </table>
+      </div>
+      <div class="flex items-center justify-between mt-3 text-xs text-slate-500 dark:text-slate-400">
+        <span id="negociosPageinfo">—</span>
+        <div class="flex items-center gap-2">
+          <button @click="if(negociosPage>1){negociosPage--; refreshNegocios()}" :disabled="negociosPage<=1"
+            class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40">&#8249; Anterior</button>
+          <span x-text="'Pág. '+negociosPage"></span>
+          <button @click="if(negociosHasMore){negociosPage++; refreshNegocios()}" :disabled="!negociosHasMore"
+            class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40">Siguiente &#8250;</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab volumen -->
+
+  <!-- ─────────── TAB: COSECHAS ─────────── -->
+  <div x-show="tab==='cosechas'" x-cloak class="space-y-5">
+
+    <!-- Heatmap cosechas -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100">Cosechas · <span x-text="cosechaTitle" class="text-brand-600 dark:text-brand-400"></span></h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">% de leads que pasan de la <em>etapa origen</em> a la <em>destino</em> en N semanas/meses</p>
+        </div>
+        <span class="text-xs text-slate-500 dark:text-slate-400" x-text="cosechaSummary"></span>
+      </div>
+      <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+        <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa origen
+          <select x-model="cosechaOrigen" @change="refreshCosechas()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal">
+            <template x-for="e in etapas" :key="e.key"><option :value="e.key" x-text="e.label"></option></template>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Etapa destino
+          <select x-model="cosechaDestino" @change="refreshCosechas()" class="rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-sm py-1.5 font-normal normal-case tracking-normal">
+            <template x-for="e in etapas" :key="e.key"><option :value="e.key" x-text="e.label"></option></template>
+          </select>
+        </label>
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</span>
+          <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+            <template x-for="g in [['semana','Semana'],['mes','Mes']]" :key="g[0]">
+              <button @click="cosechaGran=g[0]; refreshCosechas()" x-text="g[1]"
+                :class="cosechaGran===g[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'"
+                class="flex-1 px-2 py-1.5"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Bucket</span>
+          <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+            <template x-for="b in [['iso','ISO'],['dias','7d/30d']]" :key="b[0]">
+              <button @click="cosechaBucket=b[0]; refreshCosechas()" x-text="b[1]"
+                :class="cosechaBucket===b[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'"
+                class="flex-1 px-2 py-1.5"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Conteo</span>
+          <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs">
+            <template x-for="m in [['cohorte','Cohorte'],['funnel','Funnel']]" :key="m[0]">
+              <button @click="cosechaConteo=m[0]; refreshCosechas()" x-text="m[1]"
+                :class="cosechaConteo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'"
+                class="flex-1 px-2 py-1.5"></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Modo</span>
+          <div class="flex items-center gap-2">
+            <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 text-xs flex-1">
+              <template x-for="m in [['pct','% coh.'],['share','Share'],['abs','Núm.']]" :key="m[0]">
+                <button @click="cosechaModo=m[0]; renderCosechasTable()" x-text="m[1]"
+                  :class="cosechaModo===m[0] ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'"
+                  class="flex-1 px-2 py-1.5"></button>
+              </template>
+            </div>
+            <label class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              <input type="checkbox" x-model="cosechaAcum" @change="renderCosechasTable()" class="accent-brand-600">Acum.
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-x-auto"><table class="min-w-full text-xs md:text-sm" id="cosechasTable"></table></div>
+      <div id="cosechasEmpty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+    </div>
+
+    <!-- Comparación de funnels -->
+    <div>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-1">Comparar funnels</h2>
+      <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">Cohorte = nids asignados en el mes elegido; cada etapa = cuántos de esos la alcanzaron. Cada lado tiene filtros independientes.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        <!-- Panel Cohorte A -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:#2563eb"></span>Cohorte A
+          </h2>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3">
+            <!-- Mes A -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+              <select x-model="mesA" @change="refreshCompare('A')"
+                class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+              </select>
+            </div>
+            <!-- Equipo A -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+              <div x-data="multiSelect('cmpA_equipo', () => filtersOptions.equipos || [], () => refreshCompare('A'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <!-- Fuente A -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
+              <div x-data="multiSelect('cmpA_fuente', () => filtersOptions.fuentes || [], () => refreshCompare('A'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <!-- Área A -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Área</label>
+              <div x-data="multiSelect('cmpA_area', () => filtersOptions.areas || [], () => refreshCompare('A'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-4 mb-2" id="funnelHdrA">—</div>
+          <div id="funnelA" class="space-y-2"></div>
+        </div>
+
+        <!-- Panel Cohorte B -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:#059669"></span>Cohorte B
+          </h2>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3">
+            <!-- Mes B -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+              <select x-model="mesB" @change="refreshCompare('B')"
+                class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+              </select>
+            </div>
+            <!-- Equipo B -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+              <div x-data="multiSelect('cmpB_equipo', () => filtersOptions.equipos || [], () => refreshCompare('B'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <!-- Fuente B -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
+              <div x-data="multiSelect('cmpB_fuente', () => filtersOptions.fuentes || [], () => refreshCompare('B'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <!-- Área B -->
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Área</label>
+              <div x-data="multiSelect('cmpB_area', () => filtersOptions.areas || [], () => refreshCompare('B'))"
+                   class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-4 mb-2" id="funnelHdrB">—</div>
+          <div id="funnelB" class="space-y-2"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /tab cosechas -->
+
+</div>
+
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("imx", {
+    equipo: [], fuente: [], area: [],
+    convNum: ["Captaciones 3 checks"], convDen: ["Asignados"],
+    cmpA_equipo: [], cmpA_fuente: [], cmpA_area: [],
+    cmpB_equipo: [], cmpB_fuente: [], cmpB_area: [],
+  });
+});
+
+function multiSelect(key, getOptionsFn, onChange) {
+  return {
+    key, values: [], open: false,
+    init() { this.values = (Alpine.store("imx")[this.key] || []).slice(); },
+    options() { return getOptionsFn() || []; },
+    allSelected() { return this.values.length === this.options().length && this.options().length > 0; },
+    _sync() { Alpine.store("imx")[this.key] = this.values.slice(); onChange && onChange(); },
+    toggle(v) { const i = this.values.indexOf(v); if (i >= 0) this.values.splice(i, 1); else this.values.push(v); this._sync(); },
+    toggleAll(e) { this.values = e.target.checked ? [...this.options()] : []; this._sync(); },
+    btnLabel() { const n = this.values.length, t = this.options().length; if (n === 0 || n === t) return "Todos"; if (n === 1) return this.values[0]; return `${n} seleccionados`; },
+  };
+}
+
+function funnelInmoMx() {
+  return {
+    chart: null, loading: false, tab: "volumen",
+    fechaDesde: "2026-01-01", fechaHasta: "", granularidad: "mes",
+    filtersOptions: {},
+    etapas: [], etapasLabels: [], _labelToKey: {},
+    mesA: "", mesB: "",
+    cosechaOrigen: "Asignados", cosechaDestino: "captaciones_3_checks",
+    cosechaGran: "semana", cosechaBucket: "iso", cosechaConteo: "cohorte",
+    cosechaModo: "pct", cosechaAcum: false, cosechaData: null, cosechaTitle: "", cosechaSummary: "",
+    negociosEtapa: "fecha_asignado", negociosEtapas: [], negociosSearch: "", negociosPage: 1, negociosPageSize: 50, negociosHasMore: false,
+    dims: ["equipo", "fuente", "area"],
+
+    async init() {
+      const re = await fetch("/api/funnel/inmo-mx?action=etapas");
+      this.etapas = await re.json();
+      this.etapasLabels = this.etapas.map(e => e.label);
+      this._labelToKey = Object.fromEntries(this.etapas.map(e => [e.label, e.key]));
+      await this.loadFilters();
+      this.reload();
+    },
+
+    switchTab(t) { this.tab = t; },
+    refresh() { this.reload(); },
+
+    chartParams() {
+      const s = Alpine.store("imx");
+      const p = new URLSearchParams();
+      p.set("granularidad", this.granularidad);
+      p.set("fecha_desde", this.fechaDesde);
+      p.set("fecha_hasta", this.fechaHasta);
+      for (const d of this.dims) for (const v of (s[d] || [])) p.append(d, v);
+      return p;
+    },
+
+    kpiParams() {
+      const s = Alpine.store("imx");
+      const p = new URLSearchParams();
+      for (const d of this.dims) for (const v of (s[d] || [])) p.append(d, v);
+      return p;
+    },
+
+    async loadFilters() {
+      const p = new URLSearchParams({ fecha_desde: this.fechaDesde, fecha_hasta: this.fechaHasta });
+      const r = await fetch("/api/funnel/inmo-mx?action=filters&" + p);
+      this.filtersOptions = await r.json();
+      const meses = this.filtersOptions.meses || [];
+      if (!this.mesA && meses.length) { this.mesA = meses[0]; this.refreshCompare("A"); }
+      if (!this.mesB && meses.length > 1) { this.mesB = meses[1]; this.refreshCompare("B"); }
+    },
+
+    async reload() {
+      this.loading = true;
+      const r = await fetch("/api/funnel/inmo-mx?action=volumen&" + this.chartParams());
+      this.render(await r.json());
+      this.loading = false;
+      this.loadKpis();
+      this.refreshConvTime();
+      this.refreshCosechas();
+      this.refreshNegocios();
+    },
+
+    async loadKpis() {
+      const r = await fetch("/api/funnel/inmo-mx?action=kpis&" + this.kpiParams());
+      const kpis = await r.json();
+      const el = document.getElementById("kpis");
+      if (!el) return;
+      el.innerHTML = `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">` + kpis.map(k => {
+        const delta = k.delta == null ? "" : `<span class="text-xs font-semibold px-1.5 py-0.5 rounded-full ml-1 ${k.delta >= 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'}">${k.delta >= 0 ? '+' : ''}${k.delta.toFixed(1)}%</span>`;
+        return `<div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3">
+          <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">${k.label}</div>
+          <div class="text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-1">${k.actual.toLocaleString("es-MX")}${delta}</div>
+          ${k.anterior != null ? `<div class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Ant.: ${k.anterior.toLocaleString("es-MX")} · ${k.mtd_label || ""}</div>` : ""}
+        </div>`;
+      }).join("") + `</div>`;
+    },
+
+    render(data) {
+      const el = document.getElementById("chartVolumen");
+      if (!el) return;
+      Chart.getChart(el)?.destroy();
+      this.chart = new Chart(el.getContext("2d"), {
+        type: "bar",
+        data: { labels: data.labels, datasets: data.datasets.map(d => ({ label: d.label, data: d.data, backgroundColor: d.color, borderRadius: 4, borderSkipped: false })) },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "rect", padding: 14, font: { size: 11 } } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y.toLocaleString("es-MX")}` } } },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 11 } } }, y: { beginAtZero: true, ticks: { font: { size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+"k" : v } } },
+          animation: { duration: 300 },
+        },
+      });
+    },
+
+    async refreshConvTime() {
+      const s = Alpine.store("imx");
+      const p = this.chartParams();
+      for (const l of (s.convNum || [])) p.append("num", this._labelToKey[l] || l);
+      for (const l of (s.convDen || [])) p.append("den", this._labelToKey[l] || l);
+      const r = await fetch("/api/funnel/inmo-mx?action=conv-time&" + p);
+      this.renderConvTime(await r.json());
+    },
+
+    renderConvTime(data) {
+      const fmt = n => n.toLocaleString("es-MX");
+      const totalsEl = document.getElementById("convTotals");
+      if (totalsEl) {
+        const totalCvr = data.total_cvr == null ? "—" : data.total_cvr.toFixed(2) + "%";
+        totalsEl.innerHTML = `Total: <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_num)}</strong> / <strong class="text-slate-700 dark:text-slate-200">${fmt(data.total_den)}</strong> = <strong class="text-brand-600 dark:text-brand-400">${totalCvr}</strong>`;
+      }
+      const el = document.getElementById("chartConvTime");
+      if (!el) return;
+      Chart.getChart(el)?.destroy();
+      new Chart(el.getContext("2d"), {
+        type: "line",
+        data: { labels: data.labels, datasets: [
+          { label: "CVR %", type: "line", yAxisID: "y1", data: data.cvr, borderColor: "#7c3aed", backgroundColor: "rgba(124,58,237,0.12)", fill: true, tension: 0.25, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, order: 0 },
+          { label: "Numerador", type: "bar", yAxisID: "y2", data: data.num, backgroundColor: "rgba(16,185,129,0.55)", borderWidth: 0, borderRadius: 3, order: 2 },
+          { label: "Denominador", type: "bar", yAxisID: "y2", data: data.den, backgroundColor: "rgba(148,163,184,0.30)", borderWidth: 0, borderRadius: 3, order: 3 },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          plugins: { legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "rect", padding: 14, font: { size: 11 } } }, tooltip: { callbacks: { label: c => { if (c.dataset.label === "CVR %") return ` CVR: ${c.parsed.y == null ? "—" : c.parsed.y.toFixed(2)+"%"}`; return ` ${c.dataset.label}: ${c.parsed.y.toLocaleString("es-MX")}`; } } } },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 11 } } }, y1: { position: "left", beginAtZero: true, title: { display: true, text: "CVR %", font: { size: 11 } }, ticks: { font: { size: 11 }, callback: v => v.toFixed(0)+"%" } }, y2: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: "Volumen", font: { size: 11 } }, ticks: { font: { size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+"k" : v } } },
+          animation: { duration: 0 },
+        },
+      });
+    },
+
+    async refreshCosechas() {
+      const p = this.chartParams();
+      p.delete("granularidad");
+      p.set("origen", this.cosechaOrigen);
+      p.set("destino", this.cosechaDestino);
+      p.set("granularidad", this.cosechaGran);
+      p.set("bucket", this.cosechaBucket);
+      p.set("conteo", this.cosechaConteo);
+      const r = await fetch("/api/funnel/inmo-mx?action=cosechas&" + p);
+      this.cosechaData = await r.json();
+      this.renderCosechasTable();
+    },
+
+    renderCosechasTable() {
+      const d = this.cosechaData;
+      const table = document.getElementById("cosechasTable");
+      const empty = document.getElementById("cosechasEmpty");
+      if (!d || !d.rows || d.rows.length === 0) {
+        if (table) table.innerHTML = "";
+        if (empty) empty.classList.remove("hidden");
+        this.cosechaTitle = ""; this.cosechaSummary = "";
+        return;
+      }
+      if (empty) empty.classList.add("hidden");
+      const fmtEtapa = k => (this.etapas.find(e => e.key === k) || { label: k }).label;
+      this.cosechaTitle = `${fmtEtapa(d.origen)} → ${fmtEtapa(d.destino)}`;
+      const totalLeads = d.rows.reduce((s, r) => s + r.total, 0);
+      const totalAlc = d.rows.reduce((s, r) => s + r.alcanzaron, 0);
+      this.cosechaSummary = `${d.rows.length} cohortes · ${totalLeads.toLocaleString("es-MX")} leads · ${(totalLeads > 0 ? totalAlc / totalLeads * 100 : 0).toFixed(1)}% alcanzaron destino`;
+      const offsets = (d.bucket === "dias" && d.offset_ranges) ? d.offset_ranges : (d.offset_labels || []);
+      const acum = this.cosechaAcum, modo = this.cosechaModo;
+      const scaleMax = modo === "share" ? 60 : 50;
+      const cellBg = (v, fut) => (fut || v == null || v === 0) ? "" : `background:rgba(124,58,237,${(Math.min(1, v / scaleMax) * 0.85).toFixed(3)});`;
+      const cellText = (v, fut) => { if (fut) return "text-slate-300 dark:text-slate-700"; if (v == null || v === 0) return "text-slate-400 dark:text-slate-600"; if (v >= scaleMax * 0.5) return "text-white font-semibold"; if (v >= scaleMax * 0.2) return "text-slate-900 dark:text-slate-100 font-medium"; return "text-slate-700 dark:text-slate-300"; };
+      const today = new Date().toISOString().slice(0, 10);
+      const isFutureOffset = (cohorte, off) => {
+        let bs;
+        if (this.cosechaGran === "semana") { const dt = new Date(cohorte + "T00:00:00"); dt.setDate(dt.getDate() + off * 7); bs = dt.toISOString().slice(0, 10); }
+        else { const [y, m] = cohorte.split("-").map(Number); if (d.bucket === "dias") { const dt = new Date(y, m - 1, 1); dt.setDate(dt.getDate() + off * 30); bs = dt.toISOString().slice(0, 10); } else { const dt = new Date(y, m - 1 + off, 1); bs = dt.toISOString().slice(0, 10); } }
+        return bs > today;
+      };
+      let html = `<thead class="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider"><tr><th class="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Cohorte</th><th class="px-2 py-2.5 text-right">Total</th><th class="px-2 py-2.5 text-right">Llegaron</th>`;
+      offsets.forEach(l => { html += `<th class="px-2 py-2.5 text-center">${l}</th>`; });
+      html += `</tr></thead><tbody class="divide-y divide-slate-100 dark:divide-slate-800">`;
+      d.rows.forEach(r => {
+        const pcts = acum ? r.cum_pct : r.pct, shares = acum ? r.cum_share : r.share, counts = acum ? r.cum_counts : r.counts;
+        const grp = r.total > 0 ? (r.alcanzaron / r.total * 100) : 0;
+        html += `<tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/50"><td class="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-900">${r.cohorte}</td><td class="px-2 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">${r.total.toLocaleString("es-MX")}</td><td class="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300"><span class="font-semibold">${r.alcanzaron.toLocaleString("es-MX")}</span> <span class="text-[10px] text-slate-400 ml-1">${grp.toFixed(1)}%</span></td>`;
+        offsets.forEach((l, i) => {
+          const pct = pcts[i], share = shares ? shares[i] : null, cnt = counts[i];
+          const fut = isFutureOffset(r.cohorte, i);
+          let txt, pv;
+          if (fut) { txt = "—"; pv = null; }
+          else if (modo === "abs") { txt = cnt == null ? "—" : cnt.toLocaleString("es-MX"); pv = pct; }
+          else if (modo === "share") { txt = share == null ? "—" : share.toFixed(1) + "%"; pv = share; }
+          else { txt = pct == null ? "—" : pct.toFixed(1) + "%"; pv = pct; }
+          html += `<td class="px-2 py-2 text-center text-xs tabular-nums ${cellText(pv, fut)}" style="${cellBg(pv, fut)}">${txt}</td>`;
+        });
+        html += `</tr>`;
+      });
+      html += `</tbody>`;
+      table.innerHTML = html;
+    },
+
+    async refreshCompare(c) {
+      const s = Alpine.store("imx");
+      const p = new URLSearchParams();
+      const mes = c === "A" ? this.mesA : this.mesB;
+      if (mes) p.set("mes", mes);
+      for (const v of (s["cmp" + c + "_equipo"] || [])) p.append("equipo", v);
+      for (const v of (s["cmp" + c + "_fuente"] || [])) p.append("fuente", v);
+      for (const v of (s["cmp" + c + "_area"]   || [])) p.append("area", v);
+      const r = await fetch("/api/funnel/inmo-mx?action=funnel-compare&" + p);
+      this.renderCompare(c, await r.json());
+    },
+
+    renderCompare(c, data) {
+      const accent = c === "A" ? "#2563eb" : "#059669";
+      const fmt = n => n.toLocaleString("es-MX");
+      const hdr = document.getElementById("funnelHdr" + c);
+      if (hdr) hdr.innerHTML = `<span class="text-base font-bold" style="color:${accent}">${fmt(data.total)}</span> nids · Asignados · ${data.mes}`;
+      const box = document.getElementById("funnel" + c);
+      if (!box) return;
+      box.innerHTML = data.stages.map(s => {
+        const width = Math.max(2, s.pct_first);
+        const prev = s.pct_prev == null ? "" : `<span class="text-slate-400 dark:text-slate-500 ml-1">${s.pct_prev.toFixed(1)}% vs ant.</span>`;
+        return `<div><div class="flex items-baseline justify-between text-xs mb-0.5"><span class="font-medium text-slate-700 dark:text-slate-200">${s.label}</span><span class="tabular-nums"><span class="font-semibold text-slate-900 dark:text-slate-100">${fmt(s.nids)}</span><span class="font-semibold ml-1" style="color:${accent}">${s.pct_first.toFixed(1)}%</span>${prev}</span></div><div class="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full" style="width:${width}%;background:${accent}"></div></div></div>`;
+      }).join("");
+    },
+
+    async refreshNegocios() {
+      const p = this.chartParams();
+      p.delete("granularidad");
+      p.set("etapa", this.negociosEtapa);
+      if (this.negociosSearch) p.set("search", this.negociosSearch);
+      p.set("page", this.negociosPage);
+      p.set("page_size", this.negociosPageSize);
+      const r = await fetch("/api/funnel/inmo-mx?action=negocios&" + p);
+      this.renderNegocios(await r.json());
+    },
+
+    renderNegocios(data) {
+      this.negociosEtapas = data.etapas;
+      const start = (data.page - 1) * data.page_size + 1;
+      const end = Math.min(start + data.rows.length - 1, data.total);
+      this.negociosHasMore = end < data.total;
+      const fmt = n => n.toLocaleString("es-MX");
+      const countEl = document.getElementById("negociosCount");
+      if (countEl) countEl.textContent = `${fmt(data.total)} negocios`;
+      const pageEl = document.getElementById("negociosPageinfo");
+      if (pageEl) pageEl.textContent = data.total > 0 ? `${fmt(start)}–${fmt(end)} de ${fmt(data.total)}` : "Sin resultados";
+      const tbody = document.getElementById("negociosTbody");
+      const dash = '<span class="text-slate-300 dark:text-slate-600">—</span>';
+      if (!data.rows.length) {
+        tbody.innerHTML = `<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400 dark:text-slate-500">Sin resultados</td></tr>`;
+        return;
+      }
+      const td  = v => `<td class="px-3 py-2 whitespace-nowrap">${v || dash}</td>`;
+      const tdD = v => `<td class="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400">${v || dash}</td>`;
+      tbody.innerHTML = data.rows.map(r =>
+        `<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">` +
+        `<td class="px-3 py-2 font-mono text-[11px] md:text-xs">${r.nid}</td>` +
+        td(r.equipo) + td(r.fuente) + td(r.area) +
+        tdD(r.fecha_asignado) + tdD(r.fecha_contacto) + tdD(r.fecha_aceptada) +
+        tdD(r.fecha_contrato) + tdD(r.fecha_firmas) + tdD(r.fecha_captado) +
+        `</tr>`
+      ).join("");
+    },
+
+    resetFiltros() {
+      const s = Alpine.store("imx");
+      for (const d of this.dims) s[d] = [];
+      document.querySelectorAll("[x-data^=\"multiSelect('\"]").forEach(el => {
+        const dd = el._x_dataStack && el._x_dataStack[0];
+        if (dd && this.dims.includes(dd.key)) dd.values = [];
+      });
+      this.reload();
+    },
+  };
+}
+</script>
