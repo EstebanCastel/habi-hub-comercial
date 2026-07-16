@@ -69,7 +69,7 @@ function convSeller() {
 
     async loadCampaigns() {
       try {
-        const r = await fetch("/conversion/seller/campaigns");
+        const r = await fetch("/api/conversion/seller?action=campaigns");
         const j = await r.json();
         this.campaignOptions = j.campaigns || [];
       } catch (e) { this.campaignOptions = []; }
@@ -83,7 +83,7 @@ function convSeller() {
     },
 
     async loadCycles() {
-      const r = await fetch("/conversion/seller/cycles");
+      const r = await fetch("/api/conversion/seller?action=cycles");
       const j = await r.json();
       this.cicloOptions = j.periods;
       // Ciclo "actual" = el primero que aún no termina (cierre_end >= hoy)
@@ -107,7 +107,7 @@ function convSeller() {
     async loadData() {
       const qs = (this.selectedCampaigns || [])
         .map(c => "campaign=" + encodeURIComponent(c)).join("&");
-      const r = await fetch("/conversion/seller/data" + (qs ? "?" + qs : ""));
+      const r = await fetch("/api/conversion/seller?action=data" + (qs ? "&" + qs : ""));
       this.raw = await r.json();
       // Primera carga: pre-selecciona el ciclo actual (ya con los multiselects montados).
       if (!this._ciclosInited) {
@@ -120,7 +120,7 @@ function convSeller() {
     async forceRefresh() {
       this.refreshing = true;
       try {
-        await fetch("/admin/cache/clear", { method: "POST" });
+        await fetch("/api/admin/cache/clear", { method: "POST" });
         await this.loadData();
       } finally {
         setTimeout(() => { this.refreshing = false; }, 800);
@@ -510,7 +510,7 @@ function convSeller() {
         params.set("ciclo", single);
         params.set("producto", this.producto);
         (this.selectedCampaigns || []).forEach(c => params.append("campaign", c));
-        const r = await fetch("/conversion/seller/kpis-compare?" + params.toString());
+        const r = await fetch("/api/conversion/seller?action=kpis-compare&" + params.toString());
         const j = await r.json();
         if (this._kpiCompareKey !== key) return; // llegó tarde: otra vista activa
         this.prevRows = j.prev_rows || [];

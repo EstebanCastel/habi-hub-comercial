@@ -43,6 +43,28 @@ const CAT_COLORS: Record<string, string> = {
   'Sin categoría': '#94a3b8',
 };
 
+const MOTIVO_TABLE = 'sellers-main-prod.mid_funnel_ibuyer.seller_digital_co_recepcionista_mm';
+const MOTIVO_SIN = 'Sin dato';
+const MOTIVO_CATEGORIAS = [
+  { key: 'Cambio de casa',       color: '#3b82f6' },
+  { key: 'Reubicación',          color: '#10b981' },
+  { key: 'Inversión',            color: '#7c3aed' },
+  { key: 'Necesidad financiera', color: '#ea580c' },
+  { key: 'Separación',           color: '#db2777' },
+  { key: 'Otro',                 color: '#64748b' },
+];
+
+const FUNNEL_COMPARE_STAGES: [string, string, boolean][] = [
+  ['Primer_asigancion',               'Primer Asignación',     false],
+  ['Cita agendada',                   'Cita agendada',         false],
+  ['Visita efectuada',                'Visita efectuada',      false],
+  ['pre-comité validado',             'Pre-comité validado',   false],
+  ['Descartado por comité',           'Descartado por comité', true],
+  ['Aprobado',                        'Aprobado',              false],
+  ['Aceptó Oferta - Pendiente firma', 'Aceptó oferta',         false],
+  ['Cierre - Comprado',               'Cierre',                false],
+];
+
 const TABLE_ETAPAS_FIELDS: [string, string, string][] = [
   ['fecha_asignacion', 'F. asignación',  'Primer_asigancion'],
   ['fecha_cita',       'F. cita',        'Cita agendada'],
@@ -601,6 +623,167 @@ async function handleShareCat(params: URLSearchParams) {
       datasets: barsDatasets,
     },
   });
+}
+
+function _motivoCatSql(field: string): string {
+  const m = `LOWER(TRIM(${field}))`;
+  return `CASE
+    WHEN ${field} IS NULL THEN '${MOTIVO_SIN}'
+    WHEN REGEXP_CONTAINS(${m}, r'deuda|liqui|dinero|efectivo|plata|capital|saldar|solventar|crédito|credito|hipoteca|prestamo|préstamo|financ|gastos|salud|enferm|urgenci') THEN 'Necesidad financiera'
+    WHEN REGEXP_CONTAINS(${m}, r'separaci|separad|divorci|bienes|herenci|sucesi|fallec|viud|falleci') THEN 'Separación'
+    WHEN REGEXP_CONTAINS(${m}, r'inversi|invertir|negocio|oportunidad|reinvers|rentab|proyecto|renta') THEN 'Inversión'
+    WHEN REGEXP_CONTAINS(${m}, r'ciudad|viaje|traslad|me voy|me mudo|mudar|mudan|exterior|país|pais|fuera|extranjer|emigr|reubica|traslado|trabajo|estudi|campo|lejos|cerca de') THEN 'Reubicación'
+    WHEN REGEXP_CONTAINS(${m}, r'comprar|compra|cambi|vivienda|casa|inmueble|apartamento|apto|residencia|domicilio|grande|nuev|vivir|arrend|arriendo|alquil|hogar|propiedad') THEN 'Cambio de casa'
+    ELSE 'Otro'
+  END`;
+}
+
+function _motivoCte(): string {
+  return `
+    SELECT nid,
+      motivo_venta_string AS motivo_venta,
+      ${_motivoCatSql('motivo_venta_string')} AS motivo_cat
+    FROM \`${MOTIVO_TABLE}\`
+    WHERE motivo_venta_string IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY fecha_interaccion DESC, fecha_asignacion DESC) = 1
+  `;
+}
+
+async function handleShareMotivo(params: URLSearchParams) {
+  const granularidad = getString(params, 'granularidad', 'mes');
+  const fechaDesde   = getString(params, 'fecha_desde', FECHA_INICIO);
+  const fechaHasta   = getString(params, 'fecha_hasta', today());
+  const equipo    = getList(params, 'equipo');
+  const catCom    = getList(params, 'cat_com');
+  const cat       = getList(params, 'cat');
+  const recurrencia = getList(params, 'recurrencia');
+  const fuente    = getList(params, 'fuente');
+  const area      = getList(params, 'area');
+  const campaign  = params.getAll('campaign');
+
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  const [groupExpr] = _groupExpr(granularidad);
+
+  const sql = `
+    WITH comerciales AS (${_comercialesUnnest()}),
+    motivo AS (${_motivoCte()})
+    SELECT
+      ${groupExpr} AS periodo,
+      COALESCE(m.motivo_cat, '${MOTIVO_SIN}') AS categoria,
+      COUNT(DISTINCT f.nid) AS nids
+    FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+    LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
+    LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    LEFT JOIN motivo m ON m.nid = f.nid
+    WHERE ${where}
+      AND f.valor = 'Primer_asigancion'
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    `;
+  let rows = await query(sql);
+  rows = rows.filter(r => r.periodo != null);
+
+  const donut: Record<string, number> = {};
+  const byPeriod: Record<string, Record<string, number>> = {};
+  const catsSeen = new Set<string>();
+  const periodosSet = new Set<string>();
+
+  for (const r of rows) {
+    const c = (r.categoria as string) || MOTIVO_SIN;
+    catsSeen.add(c);
+    periodosSet.add(r.periodo as string);
+    donut[c] = (donut[c] || 0) + Number(r.nids);
+    if (!byPeriod[r.periodo as string]) byPeriod[r.periodo as string] = {};
+    byPeriod[r.periodo as string][c] = Number(r.nids);
+  }
+
+  const colorByCat: Record<string, string> = {};
+  for (const mc of MOTIVO_CATEGORIAS) colorByCat[mc.key] = mc.color;
+  colorByCat[MOTIVO_SIN] = '#cbd5e1';
+
+  const order = [...MOTIVO_CATEGORIAS.map(c => c.key), MOTIVO_SIN];
+  const catsOrdered = order.filter(c => catsSeen.has(c));
+  const periodosOrdered = [...periodosSet].sort();
+  const donutValues = catsOrdered.map(c => donut[c] || 0);
+
+  return NextResponse.json({
+    donut: {
+      labels:  catsOrdered,
+      values:  donutValues,
+      colors:  catsOrdered.map(c => colorByCat[c] || '#94a3b8'),
+      total:   donutValues.reduce((a, b) => a + b, 0),
+    },
+    bars: {
+      labels:   periodosOrdered,
+      datasets: catsOrdered.map(c => ({
+        label: c,
+        color: colorByCat[c] || '#94a3b8',
+        data:  periodosOrdered.map(p => (byPeriod[p] || {})[c] || 0),
+      })),
+    },
+  });
+}
+
+async function handleFunnelCompare(params: URLSearchParams) {
+  const mes       = params.get('mes');
+  const equipo    = getList(params, 'equipo');
+  const catCom    = getList(params, 'cat_com');
+  const cat       = getList(params, 'cat');
+  const recurrencia = getList(params, 'recurrencia');
+  const fuente    = getList(params, 'fuente');
+  const area      = getList(params, 'area');
+
+  const whereAsig   = _buildWhere(FECHA_INICIO, today(), equipo, catCom, cat, recurrencia, fuente, area);
+  const cohortWhere = mes ? `AND FORMAT_DATE('%Y-%m', fecha_origen) = '${mes}'` : '';
+  const stageKeysQ  = _quoteList(FUNNEL_COMPARE_STAGES.map(s => s[0]));
+
+  const sql = `
+    WITH comerciales AS (${_comercialesUnnest()}),
+    asig AS (
+      SELECT f.nid, MIN(DATE(f.fecha)) AS fecha_origen
+      FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+      LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
+      LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      WHERE ${whereAsig}
+        AND f.valor = 'Primer_asigancion'
+      GROUP BY f.nid
+    ),
+    cohort AS (SELECT nid, fecha_origen FROM asig WHERE TRUE ${cohortWhere}),
+    stage_min AS (
+      SELECT f.nid, f.valor AS etapa, MIN(DATE(f.fecha)) AS fecha_etapa
+      FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
+      JOIN cohort co ON co.nid = f.nid
+      WHERE f.valor IN (${stageKeysQ})
+      GROUP BY 1, 2
+    ),
+    reached AS (
+      SELECT sm.etapa, COUNT(DISTINCT sm.nid) AS nids
+      FROM stage_min sm JOIN cohort co ON co.nid = sm.nid
+      WHERE sm.fecha_etapa >= co.fecha_origen
+      GROUP BY 1
+    )
+    SELECT etapa, nids FROM reached
+    `;
+  const rows = await query(sql);
+  const byEtapa: Record<string, number> = {};
+  for (const r of rows) byEtapa[r.etapa as string] = Number(r.nids);
+
+  const first = byEtapa['Primer_asigancion'] || 0;
+  const stages: object[] = [];
+  let prevN: number | null = null;
+
+  for (const [key, lbl, excl] of FUNNEL_COMPARE_STAGES) {
+    const n = byEtapa[key] || 0;
+    stages.push({
+      key, label: lbl, exclusion: excl,
+      nids: n,
+      pct_first: first > 0 ? n / first * 100 : 0,
+      pct_prev:  (prevN && prevN > 0) ? n / prevN * 100 : null,
+    });
+    if (!excl) prevN = n;
+  }
+
+  return NextResponse.json({ mes: mes ?? 'Todo', total: first, stages });
 }
 
 async function handleConvTime(params: URLSearchParams) {
@@ -1304,6 +1487,10 @@ export async function GET(request: NextRequest) {
         return await handleKpis(searchParams);
       case 'share-cat':
         return await handleShareCat(searchParams);
+      case 'share-motivo':
+        return await handleShareMotivo(searchParams);
+      case 'funnel-compare':
+        return await handleFunnelCompare(searchParams);
       case 'conv-time':
         return await handleConvTime(searchParams);
       case 'negocios':

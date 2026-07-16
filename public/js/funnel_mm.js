@@ -136,6 +136,8 @@ function funnelMM() {
     granularidad: "mes",
     filtersOptions: { equipos:[], cats_com:[], cats:[], recurrencias:[], fuentes:[], areas:[], motivos:[], campaigns:[] },
     etapasList: [],
+    kpisData: [],
+    kpisMeta: {},
     loading: { volumen: false, kpis: false, shareCat: false, shareMotivo: false, convTime: false, negocios: false, metas: false, cosechas: false, precios: false },
     negociosEtapa: "fecha_asignacion",
     negociosSearch: "",
@@ -242,12 +244,12 @@ function funnelMM() {
     },
 
     async loadFilterOptions() {
-      const r = await fetch(`/funnel/mm/filters?fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
+      const r = await fetch(`/api/funnel/mm?action=filters&fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
       this.filtersOptions = await r.json();
     },
 
     async loadEtapas() {
-      const r = await fetch("/funnel/mm/etapas");
+      const r = await fetch("/api/funnel/mm?action=etapas");
       const arr = await r.json();
       this.etapasList = arr.map(e => e.key);
       this.etapasFull = arr;
@@ -257,7 +259,7 @@ function funnelMM() {
       // Limpia cache servidor y vuelve a pedir todo el tab actual
       this.refreshing = true;
       try {
-        await fetch("/admin/cache/clear", { method: "POST" });
+        await fetch("/api/admin/cache/clear", { method: "POST" });
         // Re-cargar opciones de filtro también (por si cambió data)
         await this.loadFilterOptions();
         this.refreshVolumen();
@@ -265,7 +267,7 @@ function funnelMM() {
         this.refreshShareMotivo();
         this.refreshConvTime();
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
         if (this.tab === "cosechas" && this.cosechasInited) this.refreshCosechas();
       } finally {
@@ -283,7 +285,7 @@ function funnelMM() {
         this.refreshConvTime();
         this.negociosPage = 1;
         this.refreshNegocios();
-        htmx.trigger(document.getElementById("kpis-section"), "refresh-kpis");
+        this.refreshKpis();
         if (this.tab === "metas" && this.metasInited) this.refreshMetas();
         if (this.tab === "cosechas" && this.cosechasInited) this.refreshCosechas();
         if (this.tab === "precios" && this.preciosInited) this.refreshPrecios();
@@ -326,7 +328,7 @@ function funnelMM() {
       for (const v of (s["cmp"+c+"_cat"]    || [])) p.append("cat", v);
       for (const v of (s["cmp"+c+"_fuente"] || [])) p.append("fuente", v);
       for (const v of (s["cmp"+c+"_motivo"] || [])) p.append("motivo", v);
-      const r = await fetch(`/funnel/mm/funnel-compare?${p}`);
+      const r = await fetch(`/api/funnel/mm?action=funnel-compare&${p}`);
       this.renderCompare(c, await r.json());
     },
 
@@ -360,7 +362,7 @@ function funnelMM() {
 
     async initMetas() {
       this.metasInited = true;
-      const r = await fetch("/funnel/mm/metas/config");
+      const r = await fetch("/api/funnel/mm?action=metas-config");
       this.metaConfig = await r.json();
       this.metaCycles = this.metaConfig.cycles || [];
       this.metaEtapas = this.metaConfig.etapas || [];
@@ -382,8 +384,8 @@ function funnelMM() {
         params.desglose = this.metaDesglose;
         if (this.metaAsumeArea) params.asume_area = "true";
         const [realRes, kpiRes] = await Promise.all([
-          fetch(`/funnel/mm/metas/real?${buildQS(params)}`).then(r => r.json()),
-          fetch(`/funnel/mm/metas/kpi-tendencias?${buildQS(params)}`).then(r => r.json()),
+          fetch(`/api/funnel/mm?action=metas-real&${buildQS(params)}`).then(r => r.json()),
+          fetch(`/api/funnel/mm?action=metas-kpi-tendencias&${buildQS(params)}`).then(r => r.json()),
         ]);
         this.metaReal = realRes;
         this.metaKpi = kpiRes.series || {};
@@ -575,7 +577,7 @@ function funnelMM() {
         if (this.negociosSearch) params.search = this.negociosSearch;
         params.page = this.negociosPage;
         params.page_size = this.negociosPageSize;
-        const r = await fetch(`/funnel/mm/negocios?${buildQS(params)}`);
+        const r = await fetch(`/api/funnel/mm?action=negocios&${buildQS(params)}`);
         this.renderNegocios(await r.json());
       } finally {
         this.loading.negocios = false;
@@ -628,7 +630,7 @@ function funnelMM() {
       let p = 1, fetched = 0;
       while (true) {
         params.page = p;
-        const r = await fetch(`/funnel/mm/negocios?${buildQS(params)}`);
+        const r = await fetch(`/api/funnel/mm?action=negocios&${buildQS(params)}`);
         const data = await r.json();
         all.push(...data.rows);
         fetched += data.rows.length;
@@ -649,10 +651,24 @@ function funnelMM() {
       URL.revokeObjectURL(url);
     },
 
+    async refreshKpis() {
+      this.loading.kpis = true;
+      try {
+        const r = await fetch(`/api/funnel/mm?action=kpis&${buildQS(filterParams())}`);
+        const d = await r.json();
+        this.kpisData = d.kpis || [];
+        this.kpisMeta = { label_actual: d.label_actual, label_anterior: d.label_anterior, dia_corte: d.dia_corte };
+      } catch(e) {
+        console.error('[funnelMM] refreshKpis error:', e);
+      } finally {
+        this.loading.kpis = false;
+      }
+    },
+
     async refreshVolumen() {
       this.loading.volumen = true;
       try {
-        const r = await fetch(`/funnel/mm/volumen?${buildQS(filterParams())}`);
+        const r = await fetch(`/api/funnel/mm?action=volumen&${buildQS(filterParams())}`);
         this.renderVolumen(await r.json());
       } finally {
         this.loading.volumen = false;
@@ -671,7 +687,7 @@ function funnelMM() {
         // Filtros nuevos (no tienen contraparte global)
         if ((s.shareCatPrioridadMM   || []).length) params.prioridad_mm   = s.shareCatPrioridadMM;
         if ((s.shareCatPrioridadInmo || []).length) params.prioridad_inmo = s.shareCatPrioridadInmo;
-        const r = await fetch(`/funnel/mm/share-cat?${buildQS(params)}`);
+        const r = await fetch(`/api/funnel/mm?action=share-cat&${buildQS(params)}`);
         const data = await r.json();
         this.lastShareCatData = data;
         this.renderShareCat(data);
@@ -683,7 +699,7 @@ function funnelMM() {
     async refreshShareMotivo() {
       this.loading.shareMotivo = true;
       try {
-        const r = await fetch(`/funnel/mm/share-motivo?${buildQS(filterParams())}`);
+        const r = await fetch(`/api/funnel/mm?action=share-motivo&${buildQS(filterParams())}`);
         const data = await r.json();
         this.lastShareMotivoData = data;
         this.renderShareMotivo(data);
@@ -707,7 +723,7 @@ function funnelMM() {
         if ((s.convTimeRecurrencia || []).length) params.recurrencia  = s.convTimeRecurrencia;
         if ((s.convTimePrioridadMM || []).length) params.prioridad_mm = s.convTimePrioridadMM;
         if ((s.convTimeCampaign    || []).length) params.campaign     = s.convTimeCampaign;
-        const r = await fetch(`/funnel/mm/conv-time?${buildQS(params)}`);
+        const r = await fetch(`/api/funnel/mm?action=conv-time&${buildQS(params)}`);
         this.renderConvTime(await r.json());
       } finally {
         this.loading.convTime = false;
@@ -1036,7 +1052,7 @@ function funnelMM() {
         params.granularidad = this.cosechaGran;
         params.bucket = this.cosechaBucket;
         params.conteo = this.cosechaConteo;
-        const r = await fetch(`/funnel/mm/cosechas?${buildQS(params)}`);
+        const r = await fetch(`/api/funnel/mm?action=cosechas&${buildQS(params)}`);
         this.cosechaData = await r.json();
         this.renderCosechasTable();
       } finally {
@@ -1186,7 +1202,7 @@ function funnelMM() {
     async initPrecios() {
       this.preciosInited = true;
       try {
-        const r = await fetch(`/funnel/mm/precios-subsidios/filters?fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}&fecha_tipo=${this.psFechaTipo}`);
+        const r = await fetch(`/api/funnel/mm/precios-subsidios?action=filters&fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}&fecha_tipo=${this.psFechaTipo}`);
         const f = await r.json();
         this.psAreas = (f.areas || []).filter(a => a && a !== "sin_area" && a !== "otra");
         this.psEquipos = (f.equipos || []).filter(e => e && e !== "(sin equipo)");
@@ -1208,7 +1224,7 @@ function funnelMM() {
         params.set("granularidad", this.psGran);
         if (this.psArea)   params.set("area", this.psArea);
         if (this.psEquipo) params.set("equipo", this.psEquipo);
-        const r = await fetch(`/funnel/mm/precios-subsidios/data?${params}`);
+        const r = await fetch(`/api/funnel/mm/precios-subsidios?action=data&${params}`);
         const d = await r.json();
         this.psKpis = d.kpis || {};
         this.renderPreciosCharts(d.series || {});

@@ -123,7 +123,7 @@ function funnelCombinado() {
     switchTab(t) { this.tab = t; },
 
     async loadFilterOptions() {
-      const r = await fetch(`/funnel/combinado/filters?fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
+      const r = await fetch(`/api/funnel/combinado?action=filters&fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
       this.filtersOptions = await r.json();
       const meses = this.filtersOptions.meses || [];
       if (!this.mesA && meses.length) { this.mesA = meses[0]; this.refreshCompare("A"); }
@@ -132,7 +132,7 @@ function funnelCombinado() {
     },
 
     async loadEtapas() {
-      const r = await fetch("/funnel/combinado/etapas");
+      const r = await fetch("/api/funnel/combinado?action=etapas");
       const data = await r.json();
       this.etapaGroups = data.groups || [];
     },
@@ -174,7 +174,7 @@ function funnelCombinado() {
     async refreshConvTime() {
       this.loading.convTime = true;
       try {
-        const r = await fetch(`/funnel/combinado/conv-time?${buildQS(this.filterParams())}`);
+        const r = await fetch(`/api/funnel/combinado?action=conv-time&${buildQS(this.filterParams())}`);
         const data = await r.json();
         this.renderConvTime(data);
         this.refreshCosechas();
@@ -200,7 +200,7 @@ function funnelCombinado() {
       return out;
     },
     async refreshCosechas() {
-      const r = await fetch(`/funnel/combinado/cosechas?${buildQS(this.cosechaParams())}`);
+      const r = await fetch(`/api/funnel/combinado?action=cosechas&${buildQS(this.cosechaParams())}`);
       this.cosechaData = await r.json();
       this.renderCosechasTable();
     },
@@ -239,7 +239,7 @@ function funnelCombinado() {
       if ((f["cmp"+c+"_equipo"] || []).length) p.equipo = f["cmp"+c+"_equipo"];
       if ((f["cmp"+c+"_area"]   || []).length) p.area   = f["cmp"+c+"_area"];
       if ((f["cmp"+c+"_motivo"] || []).length) p.motivo = f["cmp"+c+"_motivo"];
-      const r = await fetch(`/funnel/combinado/funnel-compare?${buildQS(p)}`);
+      const r = await fetch(`/api/funnel/combinado?action=funnel-compare&${buildQS(p)}`);
       this.renderCompare(c, await r.json());
     },
     renderCompare(c, data) {

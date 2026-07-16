@@ -30,20 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Chart.js */}
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" />
         <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js" />
-        {/* Tailwind config (same as original) */}
-        <script dangerouslySetInnerHTML={{ __html: `
-          tailwind.config = {
-            darkMode: 'media',
-            theme: {
-              extend: {
-                fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
-                colors: {
-                  brand: { 50:'#f5f3ff',100:'#ede9fe',200:'#ddd6fe',300:'#c4b5fd',400:'#a78bfa',500:'#8b5cf6',600:'#7c3aed',700:'#6d28d9',800:'#5b21b6',900:'#4c1d95' }
-                }
-              }
-            }
-          }
-        `}} />
+
       </head>
       <body className="h-full font-sans text-slate-800 dark:text-slate-100 antialiased transition-colors">
         <Navbar />
