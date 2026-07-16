@@ -1,0 +1,7 @@
+Categoria,Region,CVR_Asig_Agenda,CVR_Agenda_Visita,CVR_Visita_Comite,CVR_Comite_Aprobado,CVR_Aprobado_Cierre,Ev_Asig,Ev_Agenda,Ev_Visita,Ev_Comite,Ev_Aprobado,Ev_Cierre
+A,Bogotá,77.68%,65.30%,128.72%,70.52%,24.51%,2348,1824,1191,1533,1081,265
+A,Ciudades,71.52%,61.33%,121.64%,59.20%,18.65%,611,437,268,326,193,36
+B,Bogotá,29.93%,61.16%,151.27%,75.31%,25.63%,3217,963,589,891,671,172
+B,Ciudades,27.07%,59.74%,125.00%,60.00%,36.23%,569,154,92,115,69,25
+C,Bogotá,16.87%,50.44%,138.30%,62.79%,16.16%,4020,678,342,473,297,48
+C,Ciudades,13.50%,62.50%,123.33%,62.16%,15.22%,711,96,60,74,46,7
