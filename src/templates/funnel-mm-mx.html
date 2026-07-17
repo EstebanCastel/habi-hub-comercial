@@ -844,14 +844,17 @@ function funnelMmMx() {
       const kpis = await r.json();
       const el = document.getElementById("kpis");
       if (!el) return;
-      el.innerHTML = kpis.map(k => {
+      const cards = `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">` + kpis.map(k => {
         const delta = k.delta == null ? "" : `<span class="text-xs font-semibold px-1.5 py-0.5 rounded-full ml-1 ${k.delta >= 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'}">${k.delta >= 0 ? '+' : ''}${k.delta.toFixed(1)}%</span>`;
         return `<div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3">
           <div class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">${k.label}</div>
           <div class="text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-1">${k.actual.toLocaleString("es-MX")}${delta}</div>
           ${k.anterior != null ? `<div class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Ant.: ${k.anterior.toLocaleString("es-MX")} · ${k.mtd_label || ""}</div>` : ""}
         </div>`;
-      }).join("");
+      }).join("") + `</div>`;
+      const m = kpis[0] || {};
+      const footer = m.label_actual ? `<div class="text-[10px] text-slate-400 dark:text-slate-500 mt-2">MTD: ${m.label_actual} días 1–${m.dia_corte} vs ${m.label_anterior} mismos días</div>` : "";
+      el.innerHTML = cards + footer;
     },
 
     render(data) {

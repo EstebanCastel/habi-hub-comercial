@@ -132,6 +132,37 @@
   </div>
 </div>
       <div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Recurrencia</label>
+  <div x-data="multiSelect('recurrencia', () => filtersOptions.recurrencias, () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        (Todas)
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+      <div class="flex flex-col gap-1 min-w-0">
   <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
   <div x-data="multiSelect('fuente', () => filtersOptions.fuentes, () => refresh())"
        class="relative" @click.outside="open=false">
@@ -190,6 +221,73 @@
         </label>
       </template>
       <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+
+      <div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Razón de venta</label>
+  <div x-data="multiSelect('motivo', () => filtersOptions.motivos, () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        (Todas)
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in options()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt"></span>
+        </label>
+      </template>
+      <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+    </div>
+  </div>
+</div>
+      <div class="flex flex-col gap-1 min-w-0">
+  <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Campaña (utm)</label>
+  <div x-data="multiSelect('campaign', () => filtersOptions.campaigns || [], () => refresh())"
+       class="relative" @click.outside="open=false">
+    <button type="button" @click="open = !open"
+      class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between
+             bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700
+             hover:border-slate-400 dark:hover:border-slate-600
+             text-slate-700 dark:text-slate-200
+             focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+      <span x-text="btnLabel()" class="truncate"></span>
+      <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open" x-transition.opacity x-cloak
+         class="absolute z-20 mt-1 w-80 max-w-[90vw] py-1 rounded-lg max-h-72 overflow-auto
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+      <div class="px-2 pb-1 sticky top-0 bg-white dark:bg-slate-800">
+        <input type="text" x-model="filter" @click.stop placeholder="buscar campaña…"
+          class="w-full px-2 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+      </div>
+      <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">
+        (Todas)
+      </label>
+      <hr class="my-1 border-slate-100 dark:border-slate-700">
+      <template x-for="opt in filteredOptions()" :key="opt">
+        <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+          <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+          <span x-text="opt" class="font-mono break-all"></span>
+        </label>
+      </template>
+      <div x-show="filteredOptions().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
     </div>
   </div>
 </div>
@@ -484,7 +582,7 @@
     <!-- Filtros locales (sólo esta sección · sobrescriben los globales) -->
     <div class="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-3 mb-4">
       <p class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500 mb-2">Filtros locales · sobrescriben los globales sólo en esta sección</p>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div class="flex flex-col gap-1 min-w-0">
       <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
       <div x-data="multiSelect('convTimeFuente', () => filtersOptions.fuentes || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
@@ -508,6 +606,26 @@
         <div class="flex flex-col gap-1 min-w-0">
       <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
       <div x-data="multiSelect('convTimeEquipo', () => filtersOptions.equipos || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
+        <button type="button" @click="open=!open"
+          class="w-full text-left px-3 py-1.5 text-xs rounded-lg flex items-center justify-between
+                 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+          <span x-text="btnLabel()" class="truncate"></span>
+          <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-64 py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+          <template x-for="opt in options()" :key="opt">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+              <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+              <span x-text="opt"></span>
+            </label>
+          </template>
+          <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+        </div>
+      </div>
+    </div>
+        <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Recurrencia</label>
+      <div x-data="multiSelect('convTimeRecurrencia', () => filtersOptions.recurrencias || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
         <button type="button" @click="open=!open"
           class="w-full text-left px-3 py-1.5 text-xs rounded-lg flex items-center justify-between
                  bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
@@ -562,6 +680,30 @@
             </label>
           </template>
           <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+        </div>
+      </div>
+    </div>
+        <div class="flex flex-col gap-1 min-w-0">
+      <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Campaña (utm)</label>
+      <div x-data="multiSelect('convTimeCampaign', () => filtersOptions.campaigns || [], () => refreshConvTime())" class="relative" @click.outside="open=false">
+        <button type="button" @click="open=!open"
+          class="w-full text-left px-3 py-1.5 text-xs rounded-lg flex items-center justify-between
+                 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200">
+          <span x-text="btnLabel()" class="truncate"></span>
+          <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-80 max-w-[90vw] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+          <div class="px-2 pb-1 sticky top-0 bg-white dark:bg-slate-800">
+            <input type="text" x-model="filter" @click.stop placeholder="buscar campaña…"
+              class="w-full px-2 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+          </div>
+          <template x-for="opt in filteredOptions()" :key="opt">
+            <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+              <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+              <span x-text="opt" class="font-mono break-all"></span>
+            </label>
+          </template>
+          <div x-show="filteredOptions().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
         </div>
       </div>
     </div>
@@ -625,6 +767,7 @@
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Categoría</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Fuente</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Área</th>
+            <th class="px-3 py-2.5 text-left whitespace-nowrap">Razón de venta</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Asig.</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Cita</th>
             <th class="px-3 py-2.5 text-left whitespace-nowrap">Visita</th>
@@ -635,7 +778,7 @@
           </tr>
         </thead>
         <tbody id="negocios-tbody" class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-          <tr><td colspan="13" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
+          <tr><td colspan="14" class="px-3 py-4 text-center text-slate-400 dark:text-slate-500">Cargando…</td></tr>
         </tbody>
       </table>
       <div x-show="loading.negocios" x-cloak class="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm grid place-items-center">
@@ -860,6 +1003,235 @@
         </div>
       </div>
       <div id="cosechas-empty" class="hidden text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin datos para esta selección</div>
+    </div>
+
+    <!-- Comparación de funnels (cohorte A vs B) -->
+    <div>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-1">Comparar funnels</h2>
+      <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">Cohorte = nids cuya 1ª asignación cae en el mes elegido; cada etapa = cuántos de esos la alcanzaron (después de la asignación). Cada lado tiene filtros independientes.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        <!-- Cohorte A -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:#2563eb"></span>Cohorte A
+          </h2>
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 mt-3">
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+              <select x-model="mesA" @change="refreshCompare('A')"
+                class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+              <div x-data="multiSelect('cmpA_equipo', () => filtersOptions.equipos || [], () => refreshCompare('A'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Categoría</label>
+              <div x-data="multiSelect('cmpA_cat', () => filtersOptions.cats || [], () => refreshCompare('A'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
+              <div x-data="multiSelect('cmpA_fuente', () => filtersOptions.fuentes || [], () => refreshCompare('A'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Razón de venta</label>
+              <div x-data="multiSelect('cmpA_motivo', () => filtersOptions.motivos || [], () => refreshCompare('A'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-4 mb-2" id="funnelHdrA">—</div>
+          <div id="funnelA" class="space-y-2"></div>
+        </div>
+
+        <!-- Cohorte B -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 md:p-5">
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:#059669"></span>Cohorte B
+          </h2>
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 mt-3">
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Mes</label>
+              <select x-model="mesB" @change="refreshCompare('B')"
+                class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <template x-for="m in (filtersOptions.meses || [])" :key="m"><option :value="m" x-text="m"></option></template>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Equipo</label>
+              <div x-data="multiSelect('cmpB_equipo', () => filtersOptions.equipos || [], () => refreshCompare('B'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todos)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Categoría</label>
+              <div x-data="multiSelect('cmpB_cat', () => filtersOptions.cats || [], () => refreshCompare('B'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Fuente</label>
+              <div x-data="multiSelect('cmpB_fuente', () => filtersOptions.fuentes || [], () => refreshCompare('B'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 min-w-0">
+              <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Razón de venta</label>
+              <div x-data="multiSelect('cmpB_motivo', () => filtersOptions.motivos || [], () => refreshCompare('B'))" class="relative" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                  class="w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 transition">
+                  <span x-text="btnLabel()" class="truncate"></span>
+                  <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div x-show="open" x-transition.opacity x-cloak class="absolute z-20 mt-1 w-full min-w-[180px] py-1 rounded-lg max-h-72 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
+                  <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-500 dark:text-slate-400 italic">
+                    <input type="checkbox" :checked="allSelected()" @change="toggleAll($event)" class="accent-brand-600">(Todas)
+                  </label>
+                  <hr class="my-1 border-slate-100 dark:border-slate-700">
+                  <template x-for="opt in options()" :key="opt">
+                    <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200">
+                      <input type="checkbox" :value="opt" :checked="values.includes(opt)" @change="toggle(opt)" class="accent-brand-600">
+                      <span x-text="opt"></span>
+                    </label>
+                  </template>
+                  <div x-show="options().length===0" class="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Sin opciones</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-4 mb-2" id="funnelHdrB">—</div>
+          <div id="funnelB" class="space-y-2"></div>
+        </div>
+
+      </div>
     </div>
 
   </div><!-- /tab cosechas -->

@@ -43,33 +43,20 @@ const ETAPAS_INMO = [
   { key: 'captado',         label: 'Captado',          color: '#00897B' },
 ];
 
-// ── Metas Inmo model (ported from metas_inmo.py) ────────────────────────────
+// ── Metas Inmo Ciclo 6 (Julio 2026) — valores explícitos del plan ───────────
+// Antes esto era un modelo calculado (CVR × leads). Ahora las metas vienen dadas
+// directo del plan comercial (WEEKLY_METAS: valores SEMANALES por etapa y equipo),
+// replicados por las 4 semanas del ciclo. El desglose por categoría A/B/C se omite
+// (el plan no lo trae) → el toggle "Categoría" del tablero no mostrará línea de meta.
+//
+// ⚠️ El webapp usa el calendario compartido (comercial_cycles.json) donde
+// Julio = Ciclo 6, y el tablero Inmo auto-selecciona el ciclo por fecha. Por eso
+// estas metas se emiten bajo CICLO (=6), aunque el plan Inmo las numere "Ciclo 5".
 
-const LEADS_TOTAL = 6500;
-// Asignados por área metropolitana, mayo 2026 ('Valle de Aburrá' → Medellín). Escenario A Ciclo 5.
-const MAYO_ASIG: Record<string, number> = { Bogotá: 4261, Medellín: 811, Barranquilla: 330, Cali: 519 };
-const CAT_SHARE: Record<string, number> = { A: 0.0486, B: 0.2757, C: 0.6757 };
-const CAT_CVR: Record<string, number>   = { A: 0.25,   B: 0.09,   C: 0.046 };
-const FLAT_CVR_EQ: Record<string, number> = { Cali: 0.06, Barranquilla: 0.067, Medellín: 0.04 };
-
-// CVRs del funnel — mayo 2026 (nids por etapa: asignados=8.946 · perfilados=3.202 ·
-// aprobado=1.312 · ofertado=1.128 · aceptada=659 · captado=427).
-const HISTORICAL_CVRS = {
-  asig_to_perf:   3202 / 8946,
-  perf_to_aprob:  1312 / 3202,
-  aprob_to_ofert: 1128 / 1312,
-  ofert_to_ace:   659  / 1128,
-  ace_to_cap:     427  / 659,
-};
+const CICLO = 6;
+const N_SEMANAS = 4;
 
 const TARGET_EQUIPOS = ['Inmobiliaria 1', 'Inmobiliaria 2', 'Medellín', 'Cali', 'Barranquilla'];
-const EQUIPO_CIUDAD: Record<string, string> = {
-  'Inmobiliaria 1': 'Bogotá', 'Inmobiliaria 2': 'Bogotá',
-  'Medellín': 'Medellín', 'Cali': 'Cali', 'Barranquilla': 'Barranquilla',
-};
-
-const CICLO_DEFAULT = 5;
-const N_SEMANAS_DEFAULT = 4;
 
 const ETAPAS_ORDER = ['Asignados', 'Perfilados', 'Aprobados', 'Ofertados', 'Aceptadas', 'Captados'];
 
@@ -82,7 +69,29 @@ const META_ETAPA_TO_BQ: Record<string, string[]> = {
   Captados:   ['captado'],
 };
 
+// Metas SEMANALES Ciclo 6 (Julio 2026). Valores por semana (idénticos las 4
+// semanas). Total ciclo = valor × 4.
+const WEEKLY_METAS: Record<string, Record<string, number>> = {
+  Asignados:  { Total: 1500, 'Inmobiliaria 1': 557, 'Inmobiliaria 2': 556,
+                Medellín: 147, Cali: 118, Barranquilla: 121 },
+  Perfilados: { Total: 856,  'Inmobiliaria 1': 293, 'Inmobiliaria 2': 292,
+                Medellín: 137, Cali: 67,  Barranquilla: 67 },
+  Aprobados:  { Total: 333,  'Inmobiliaria 1': 120, 'Inmobiliaria 2': 119,
+                Medellín: 51,  Cali: 22,  Barranquilla: 20 },
+  Ofertados:  { Total: 309,  'Inmobiliaria 1': 118, 'Inmobiliaria 2': 118,
+                Medellín: 26,  Cali: 24,  Barranquilla: 23 },
+  Aceptadas:  { Total: 173,  'Inmobiliaria 1': 64,  'Inmobiliaria 2': 64,
+                Medellín: 17,  Cali: 13,  Barranquilla: 15 },
+  Captados:   { Total: 98,   'Inmobiliaria 1': 38,  'Inmobiliaria 2': 39,
+                Medellín: 6,   Cali: 7,   Barranquilla: 8 },
+};
+
 let _metasCache: Record<string, Record<string, Record<string, number>>> | null = null;
+
+/** Invalida la caché de metas Inmo a nivel de módulo (para admin/cache/clear). */
+export function resetMetasCache(): void {
+  _metasCache = null;
+}
 
 function loadBadCaptadosNids(): string[] {
   const csvPath = join(process.cwd(), 'data', '[CO] Corrección Incidente 7 abr Leads Inmo - bquxjob_41c0d194_19d68c1efbf.csv');
@@ -96,102 +105,26 @@ function loadBadCaptadosNids(): string[] {
   return nids;
 }
 
-function loadMetas(comerciales: Record<string, string>[]): Record<string, Record<string, Record<string, number>>> {
+/**
+ * Devuelve {etapa: {bucket: {'ciclo-week': valor}}} para el Ciclo 6.
+ * `comerciales` se ignora (se mantiene por compatibilidad con los callers).
+ */
+function loadMetas(_comerciales?: Record<string, string>[]): Record<string, Record<string, Record<string, number>>> {
+  void _comerciales;
   if (_metasCache) return _metasCache;
 
-  const people = comerciales.filter(
-    c => (c.categoria || '').startsWith('Inmobiliaria') && TARGET_EQUIPOS.includes(c.equipo)
-  );
-
-  const totalHist = Object.values(MAYO_ASIG).reduce((a, b) => a + b, 0);
-  const ciudadLeads: Record<string, number> = {};
-  for (const [c, v] of Object.entries(MAYO_ASIG)) ciudadLeads[c] = LEADS_TOTAL * v / totalHist;
-
-  const nByEqCat: Record<string, Record<string, number>> = {};
-  for (const eq of TARGET_EQUIPOS) nByEqCat[eq] = { A: 0, B: 0, C: 0 };
-  for (const p of people) {
-    const parts = (p.categoria || '').trim().split(/\s+/);
-    const c = parts[parts.length - 1].toUpperCase();
-    if (['A', 'B', 'C'].includes(c)) nByEqCat[p.equipo][c]++;
-  }
-
-  const leadsByEqCat: Record<string, Record<string, number>> = {};
-  for (const eq of TARGET_EQUIPOS) leadsByEqCat[eq] = { A: 0, B: 0, C: 0 };
-
-  const bogLeads = ciudadLeads['Bogotá'];
-  for (const cat of ['A', 'B', 'C']) {
-    const catLeadsBog = bogLeads * CAT_SHARE[cat];
-    const n1 = nByEqCat['Inmobiliaria 1'][cat];
-    const n2 = nByEqCat['Inmobiliaria 2'][cat];
-    const ntot = n1 + n2;
-    if (ntot === 0) {
-      leadsByEqCat['Inmobiliaria 1'][cat] = catLeadsBog / 2;
-      leadsByEqCat['Inmobiliaria 2'][cat] = catLeadsBog / 2;
-    } else {
-      leadsByEqCat['Inmobiliaria 1'][cat] = catLeadsBog * n1 / ntot;
-      leadsByEqCat['Inmobiliaria 2'][cat] = catLeadsBog * n2 / ntot;
-    }
-  }
-  for (const eq of ['Cali', 'Barranquilla', 'Medellín']) {
-    const cl = ciudadLeads[EQUIPO_CIUDAD[eq]];
-    for (const cat of ['A', 'B', 'C']) {
-      leadsByEqCat[eq][cat] = cl * CAT_SHARE[cat];
-    }
-  }
-
-  const leadsByEq: Record<string, number> = {};
-  for (const eq of TARGET_EQUIPOS) leadsByEq[eq] = Object.values(leadsByEqCat[eq]).reduce((a, b) => a + b, 0);
-  const leadsByCat: Record<string, number> = {};
-  for (const cat of ['A', 'B', 'C']) {
-    leadsByCat[cat] = TARGET_EQUIPOS.reduce((s, eq) => s + leadsByEqCat[eq][cat], 0);
-  }
-
-  const captacionesByEq: Record<string, number> = {};
-  const captacionesByCat: Record<string, number> = { A: 0, B: 0, C: 0 };
-  for (const eq of TARGET_EQUIPOS) {
-    const flat = FLAT_CVR_EQ[eq];
-    let total = 0;
-    for (const cat of ['A', 'B', 'C']) {
-      const cvr = flat !== undefined ? flat : CAT_CVR[cat];
-      const cap = leadsByEqCat[eq][cat] * cvr;
-      total += cap;
-      captacionesByCat[cat] += cap;
-    }
-    captacionesByEq[eq] = total;
-  }
-
-  const h = HISTORICAL_CVRS;
-  const factor: Record<string, number> = {
-    Asignados:  1.0,
-    Perfilados: h.asig_to_perf,
-    Aprobados:  h.asig_to_perf * h.perf_to_aprob,
-    Ofertados:  h.asig_to_perf * h.perf_to_aprob * h.aprob_to_ofert,
-    Aceptadas:  h.asig_to_perf * h.perf_to_aprob * h.aprob_to_ofert * h.ofert_to_ace,
-  };
-
   const metas: Record<string, Record<string, Record<string, number>>> = {};
-  const nw = N_SEMANAS_DEFAULT;
-  const ciclo = CICLO_DEFAULT;
+  const weekKeys: string[] = [];
+  for (let w = 1; w <= N_SEMANAS; w++) weekKeys.push(`${CICLO}-${w}`);
 
-  function put(etapa: string, bucket: string, totalValue: number) {
-    const weekly = totalValue / nw;
-    if (!metas[etapa]) metas[etapa] = {};
-    if (!metas[etapa][bucket]) metas[etapa][bucket] = {};
-    for (let w = 1; w <= nw; w++) {
-      metas[etapa][bucket][`${ciclo}-${w}`] = Math.round(weekly * 100) / 100;
+  for (const [etapa, buckets] of Object.entries(WEEKLY_METAS)) {
+    metas[etapa] = {};
+    // Total + equipos: valor semanal directo del plan (categorías omitidas)
+    for (const [bucket, val] of Object.entries(buckets)) {
+      metas[etapa][bucket] = {};
+      for (const wk of weekKeys) metas[etapa][bucket][wk] = val;
     }
   }
-
-  for (const [etapa, f] of Object.entries(factor)) {
-    put(etapa, 'Total', LEADS_TOTAL * f);
-    for (const eq of TARGET_EQUIPOS) put(etapa, eq, leadsByEq[eq] * f);
-    for (const cat of ['A', 'B', 'C']) put(etapa, cat, leadsByCat[cat] * f);
-  }
-
-  const totalCap = Object.values(captacionesByEq).reduce((a, b) => a + b, 0);
-  put('Captados', 'Total', totalCap);
-  for (const eq of TARGET_EQUIPOS) put('Captados', eq, captacionesByEq[eq]);
-  for (const cat of ['A', 'B', 'C']) put('Captados', cat, captacionesByCat[cat]);
 
   _metasCache = metas;
   return metas;
@@ -232,9 +165,16 @@ function baseCte(fechaDesde: string, fechaHasta: string, excludeIncidente: boole
         AND DATE(h.fecha) <= '${fechaHasta}'
     ),
     asignados AS (
-      SELECT nid, fecha, 'asignados' AS etapa
-      FROM historical_inmo
-      QUALIFY ROW_NUMBER() OVER (PARTITION BY nid ORDER BY fecha ASC) = 1
+      -- Fuente OFICIAL de asignados Inmo: leads_asignados_inmobiliaria_colombia
+      -- (1 fila por nid = primera asignación). Reemplaza el "primer evento en historical".
+      -- ⚠️ La tabla arranca en 2025-12-01, así que no hay asignados previos a esa fecha.
+      SELECT
+        a.nid,
+        TIMESTAMP(a.fecha_primera_asignacion) AS fecha,
+        'asignados' AS etapa
+      FROM \`sellers-main-prod.data_sellers_bo.leads_asignados_inmobiliaria_colombia\` a
+      WHERE DATE(a.fecha_primera_asignacion) >= '${fechaDesde}'
+        AND DATE(a.fecha_primera_asignacion) <= '${fechaHasta}'
     ),
     perfilados AS (
       SELECT nid, fecha, 'perfilados' AS etapa

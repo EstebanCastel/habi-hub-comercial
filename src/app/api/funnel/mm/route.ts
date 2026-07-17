@@ -54,6 +54,10 @@ const MOTIVO_CATEGORIAS = [
   { key: 'Otro',                 color: '#64748b' },
 ];
 
+// Opción centinela en el filtro de utm_campaign para los deals SIN campaña
+// (utm_campaign vacío/NULL). Al filtrar se traduce a '' para matchear el vacío.
+const CAMPAIGN_EMPTY_LABEL = '(vacío)';
+
 const FUNNEL_COMPARE_STAGES: [string, string, boolean][] = [
   ['Primer_asigancion',               'Primer Asignación',     false],
   ['Cita agendada',                   'Cita agendada',         false],
@@ -191,6 +195,10 @@ function loadMetas(): Record<string, Record<string, Record<string, number>>> {
   return _cachedMetas;
 }
 
+export function resetMetasCache(): void {
+  _cachedMetas = null;
+}
+
 function _parseVal(s: string | null | undefined): number | null {
   s = (s || '').trim().replace(/,/g, '').replace(/"/g, '');
   if (!s || s.startsWith('#')) return null;
@@ -206,12 +214,9 @@ function _quoteList(items: string[]): string {
   return safe.map(s => `'${s}'`).join(', ');
 }
 
-/** SQL AND clause for utm_campaign filter. Returns '' when campaigns is empty. */
-function campaignIn(field: string, campaigns: string[]): string {
-  if (!campaigns.length) return '';
-  const safe = campaigns.map(c => (c || '').replace(/'/g, "''"));
-  const lst = safe.map(s => `'${s}'`).join(', ');
-  return `AND TRIM(${field}) IN (${lst})`;
+/** Mapea el centinela '(vacío)' → '' para el IN de utm_campaign. */
+function _campaignValues(campaigns: string[]): string[] {
+  return campaigns.map(c => (c === CAMPAIGN_EMPTY_LABEL ? '' : c));
 }
 
 function _mapPrioridad(vals: string[]): string[] {
@@ -229,6 +234,7 @@ function _buildWhere(
   areas?: string[] | null,
   skipBuffers = false,
   campaigns?: string[] | null,
+  motivo?: string[] | null,
 ): string {
   const conds: string[] = [
     `DATE(f.fecha) >= '${fechaDesde}'`,
@@ -254,8 +260,11 @@ function _buildWhere(
   if (areas?.length) {
     conds.push(`COALESCE(f.area_metropolitana, '') IN (${_quoteList(areas)})`);
   }
+  if (motivo?.length) {
+    conds.push(`COALESCE(m.motivo_cat, '${MOTIVO_SIN}') IN (${_quoteList(motivo)})`);
+  }
   if (campaigns?.length) {
-    conds.push(`TRIM(COALESCE(d.utm_campaign, '')) IN (${_quoteList(campaigns)})`);
+    conds.push(`TRIM(COALESCE(d.utm_campaign, '')) IN (${_quoteList(_campaignValues(campaigns))})`);
   }
   return conds.join('\n  AND ');
 }
@@ -346,7 +355,9 @@ async function handleFilters(params: URLSearchParams) {
         COALESCE(NULLIF(d.prioridad_de_gestion_inmo, ''), '')                            AS prioridad_inmo,
         COALESCE(f.flag_recurrecia_gestion, '')                                          AS recurrencia,
         COALESCE(f.fuente, '')                                                           AS fuente,
-        COALESCE(f.area_metropolitana, '')                                               AS area
+        COALESCE(f.area_metropolitana, '')                                               AS area,
+        TRIM(COALESCE(d.utm_campaign, ''))                                               AS campaign,
+        FORMAT_DATE('%Y-%m', DATE(f.fecha))                                              AS mes
       FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
       LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
@@ -363,7 +374,10 @@ async function handleFilters(params: URLSearchParams) {
       ARRAY(SELECT DISTINCT prioridad_inmo FROM base WHERE prioridad_inmo != '' ORDER BY prioridad_inmo) AS prioridades_inmo,
       ARRAY(SELECT DISTINCT recurrencia    FROM base WHERE recurrencia    != '' ORDER BY recurrencia)    AS recurrencias,
       ARRAY(SELECT DISTINCT fuente         FROM base WHERE fuente         != '' ORDER BY fuente)         AS fuentes,
-      ARRAY(SELECT DISTINCT area           FROM base WHERE area           != '' ORDER BY area)           AS areas
+      ARRAY(SELECT DISTINCT area           FROM base WHERE area           != '' ORDER BY area)           AS areas,
+      ARRAY(SELECT DISTINCT campaign       FROM base WHERE campaign       != '' ORDER BY campaign)       AS campaigns,
+      (SELECT COUNTIF(campaign = '') FROM base)                                                          AS n_empty_campaign,
+      ARRAY(SELECT DISTINCT mes            FROM base WHERE mes            != '' ORDER BY mes DESC)       AS meses
     `;
   const rows = await query(sql);
   const r = rows[0] || {};
@@ -373,6 +387,11 @@ async function handleFilters(params: URLSearchParams) {
       .filter(x => x && x !== '' && x !== 'Sin equipo' && x !== 'Sin categoría')
       .sort();
   };
+  // Opción "(vacío)" al inicio de campañas si hay deals sin utm_campaign en el scope.
+  let campaignsOpts = clean(r.campaigns);
+  if (Number(r.n_empty_campaign || 0) > 0) {
+    campaignsOpts = [CAMPAIGN_EMPTY_LABEL, ...campaignsOpts];
+  }
   return NextResponse.json({
     equipos:          clean(r.equipos),
     cats_com:         clean(r.cats_com),
@@ -382,6 +401,11 @@ async function handleFilters(params: URLSearchParams) {
     recurrencias:     clean(r.recurrencias),
     fuentes:          clean(r.fuentes),
     areas:            clean(r.areas),
+    campaigns:        campaignsOpts,
+    // Categorías de razón de venta (estáticas — texto libre categorizado por keywords).
+    motivos:          [...MOTIVO_CATEGORIAS.map(c => c.key), MOTIVO_SIN],
+    // Meses disponibles (YYYY-MM), desc — para la comparación de cohortes.
+    meses:            ((r.meses as string[] | null) || []).filter(m => m),
   });
 }
 
@@ -406,13 +430,14 @@ async function handleVolumen(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
   const campaign = params.getAll('campaign');
 
-  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
   const [groupExpr, orderExpr] = _groupExpr(granularidad);
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})
+    ${_ctes()}
     SELECT
       ${groupExpr} AS periodo,
       f.valor      AS etapa,
@@ -420,6 +445,7 @@ async function handleVolumen(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${where}
     GROUP BY 1, 2
     ORDER BY ${orderExpr}
@@ -461,6 +487,7 @@ async function handleKpis(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
   const campaign = params.getAll('campaign');
   const campaignFilter = campaign.length ? campaign : null;
 
@@ -477,10 +504,10 @@ async function handleKpis(params: URLSearchParams) {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   const makeWhere = (start: string, end: string) =>
-    _buildWhere(start, end, equipo, catCom, cat, recurrencia, fuente, area, false, campaignFilter);
+    _buildWhere(start, end, equipo, catCom, cat, recurrencia, fuente, area, false, campaignFilter, motivo);
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})
+    ${_ctes()}
     SELECT
       'actual' AS periodo,
       f.valor AS etapa,
@@ -488,6 +515,7 @@ async function handleKpis(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${makeWhere(fmt(inicioActual), fmt(hoy))}
     GROUP BY 1, 2
     UNION ALL
@@ -498,6 +526,7 @@ async function handleKpis(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${makeWhere(fmt(inicioAnterior), fmt(finAnterior))}
     GROUP BY 1, 2
     `;
@@ -548,9 +577,10 @@ async function handleShareCat(params: URLSearchParams) {
   const area = getList(params, 'area');
   const prioridadMm = getList(params, 'prioridad_mm');
   const prioridadInmo = getList(params, 'prioridad_inmo');
+  const motivo = getList(params, 'motivo');
   const campaign = params.getAll('campaign');
 
-  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
   const extra: string[] = [];
   if (prioridadMm?.length) {
     extra.push(`COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`);
@@ -565,7 +595,7 @@ async function handleShareCat(params: URLSearchParams) {
   const [groupExpr] = _groupExpr(granularidad);
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})
+    ${_ctes()}
     SELECT
       ${groupExpr} AS periodo,
       COALESCE(NULLIF(d.prioridad_gestion_market_maker, ''), f.categoria_comercial, 'Sin categoría') AS categoria,
@@ -573,6 +603,7 @@ async function handleShareCat(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${where}
       AND f.valor = 'Primer_asigancion'
     GROUP BY 1, 2
@@ -649,6 +680,14 @@ function _motivoCte(): string {
   `;
 }
 
+// Join estándar de la CTE motivo contra funnel_diarios_col (alias f).
+const MOTIVO_JOIN = 'LEFT JOIN motivo m ON m.nid = f.nid';
+
+/** Prefijo WITH compartido: comerciales + motivo (sin coma final). */
+function _ctes(): string {
+  return `WITH comerciales AS (${_comercialesUnnest()}),\n    motivo AS (${_motivoCte()})`;
+}
+
 async function handleShareMotivo(params: URLSearchParams) {
   const granularidad = getString(params, 'granularidad', 'mes');
   const fechaDesde   = getString(params, 'fecha_desde', FECHA_INICIO);
@@ -659,14 +698,14 @@ async function handleShareMotivo(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente    = getList(params, 'fuente');
   const area      = getList(params, 'area');
+  const motivo    = getList(params, 'motivo');
   const campaign  = params.getAll('campaign');
 
-  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
   const [groupExpr] = _groupExpr(granularidad);
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
-    motivo AS (${_motivoCte()})
+    ${_ctes()}
     SELECT
       ${groupExpr} AS periodo,
       COALESCE(m.motivo_cat, '${MOTIVO_SIN}') AS categoria,
@@ -674,7 +713,7 @@ async function handleShareMotivo(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
-    LEFT JOIN motivo m ON m.nid = f.nid
+    ${MOTIVO_JOIN}
     WHERE ${where}
       AND f.valor = 'Primer_asigancion'
     GROUP BY 1, 2
@@ -732,18 +771,20 @@ async function handleFunnelCompare(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente    = getList(params, 'fuente');
   const area      = getList(params, 'area');
+  const motivo    = getList(params, 'motivo');
 
-  const whereAsig   = _buildWhere(FECHA_INICIO, today(), equipo, catCom, cat, recurrencia, fuente, area);
+  const whereAsig   = _buildWhere(FECHA_INICIO, today(), equipo, catCom, cat, recurrencia, fuente, area, false, null, motivo);
   const cohortWhere = mes ? `AND FORMAT_DATE('%Y-%m', fecha_origen) = '${mes}'` : '';
   const stageKeysQ  = _quoteList(FUNNEL_COMPARE_STAGES.map(s => s[0]));
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    ${_ctes()},
     asig AS (
       SELECT f.nid, MIN(DATE(f.fecha)) AS fecha_origen
       FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
       LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      ${MOTIVO_JOIN}
       WHERE ${whereAsig}
         AND f.valor = 'Primer_asigancion'
       GROUP BY f.nid
@@ -798,6 +839,7 @@ async function handleConvTime(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
   const prioridadMm = getList(params, 'prioridad_mm');
   const campaign = params.getAll('campaign');
 
@@ -818,7 +860,7 @@ async function handleConvTime(params: URLSearchParams) {
   const inclBuffers = getString(params, 'incl_buffers', '') === '1';
   const exclDias = getString(params, 'excl_dias', '') === '1';
 
-  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, inclBuffers, campaign.length ? campaign : null);
+  let where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, inclBuffers, campaign.length ? campaign : null, motivo);
   if (prioridadMm?.length) {
     where += `\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN (${_quoteList(_mapPrioridad(prioridadMm))})`;
   }
@@ -834,6 +876,7 @@ async function handleConvTime(params: URLSearchParams) {
         FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
         LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
         LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+        ${MOTIVO_JOIN}
         WHERE ${where}
           AND f.valor IN (${_quoteList(funnelEtapas)})`);
   }
@@ -856,7 +899,7 @@ async function handleConvTime(params: URLSearchParams) {
     if (campaign.length) {
       leadConds.push(
         `ig.nid IN (SELECT nid FROM \`sellers-main-prod.hubspot.deals\` ` +
-        `WHERE TRIM(COALESCE(utm_campaign, '')) IN (${_quoteList(campaign)}))`,
+        `WHERE TRIM(COALESCE(utm_campaign, '')) IN (${_quoteList(_campaignValues(campaign))}))`,
       );
     }
     const leadWhere = leadConds.join(' AND ');
@@ -884,6 +927,7 @@ async function handleConvTime(params: URLSearchParams) {
         FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
         LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
         LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+        ${MOTIVO_JOIN}
         WHERE ${where}
           AND f.valor = 'pre-comité validado'`);
   }
@@ -894,7 +938,7 @@ async function handleConvTime(params: URLSearchParams) {
   const numCols = num.map((e, i) => `COUNT(DISTINCT IF(etapa = '${e.replace(/'/g, "''")}', cid, NULL)) AS num_${i}`).join(',\n      ');
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    ${_ctes()},
     events AS (${eventsSql})
     SELECT
       periodo,
@@ -946,6 +990,7 @@ async function handleNegocios(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
   const campaign = params.getAll('campaign');
   const etapa = params.get('etapa');
   const search = params.get('search');
@@ -953,7 +998,7 @@ async function handleNegocios(params: URLSearchParams) {
   const pageSize = Math.min(getInt(params, 'page_size', 50), 200);
 
   // Wide date range for WHERE, date filtering via HAVING on specific stage column
-  const where = _buildWhere('2020-01-01', today(), equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  const where = _buildWhere('2020-01-01', today(), equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
 
   const validFields = new Set(TABLE_ETAPAS_FIELDS.map(([f]) => f));
   const dateField = etapa && validFields.has(etapa) ? etapa : 'fecha_asignacion';
@@ -981,7 +1026,7 @@ async function handleNegocios(params: URLSearchParams) {
   const havingSql = havingClauses.join(' AND ');
 
   const baseSql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    ${_ctes()},
     cohort AS (
       SELECT
         CAST(f.nid AS STRING) AS nid,
@@ -990,10 +1035,13 @@ async function handleNegocios(params: URLSearchParams) {
         ANY_VALUE(COALESCE(NULLIF(d.prioridad_gestion_market_maker, ''), f.categoria_comercial, '')) AS categoria,
         ANY_VALUE(COALESCE(f.fuente, ''))                                                            AS fuente,
         ANY_VALUE(COALESCE(f.area_metropolitana, ''))                                                AS area_metropolitana,
+        ANY_VALUE(m.motivo_venta)                                                                    AS motivo_venta,
+        ANY_VALUE(m.motivo_cat)                                                                      AS motivo_cat,
         ${selectEtapas}
       FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
       LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      ${MOTIVO_JOIN}
       WHERE ${where}
         ${searchClause}
       GROUP BY 1
@@ -1007,7 +1055,7 @@ async function handleNegocios(params: URLSearchParams) {
   const rows = await query(baseSql);
 
   const countSql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    ${_ctes()},
     cohort AS (
       SELECT
         CAST(f.nid AS STRING) AS nid,
@@ -1015,6 +1063,7 @@ async function handleNegocios(params: URLSearchParams) {
       FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
       LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
       LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+      ${MOTIVO_JOIN}
       WHERE ${where}
         ${searchClause}
       GROUP BY 1
@@ -1059,6 +1108,7 @@ async function handleCosechas(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
   const campaign = params.getAll('campaign');
 
   const unit = granularidad === 'semana' ? 'WEEK(MONDAY)' : 'MONTH';
@@ -1073,7 +1123,7 @@ async function handleCosechas(params: URLSearchParams) {
     offsetExpr = `DATE_DIFF(d.fecha_destino, o.fecha_origen, ${diffUnit})`;
   }
 
-  const whereOrigen = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null);
+  const whereOrigen = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
   const safeOrigen = origen.replace(/'/g, "''");
   const safeDestino = destino.replace(/'/g, "''");
 
@@ -1089,6 +1139,7 @@ async function handleCosechas(params: URLSearchParams) {
           FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
           LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
           LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+          ${MOTIVO_JOIN}
           WHERE ${whereOrigen}
             AND f.valor = '${safeOrigen}'
           GROUP BY 1, 2
@@ -1101,6 +1152,7 @@ async function handleCosechas(params: URLSearchParams) {
           FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
           LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
           LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+          ${MOTIVO_JOIN}
           WHERE ${whereOrigen}
             AND f.valor = '${safeOrigen}'
           GROUP BY f.nid
@@ -1109,7 +1161,7 @@ async function handleCosechas(params: URLSearchParams) {
   }
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()}),
+    ${_ctes()},
     ${origenCte},
     destino AS (
       SELECT nid, MIN(DATE(fecha)) AS fecha_destino
@@ -1236,6 +1288,8 @@ async function handleMetasReal(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
+  const campaign = params.getAll('campaign');
   const asumeArea = params.get('asume_area') === 'true';
 
   const cycles = loadCycles() as { ciclo: number; semanas: { num: number; inicio: string; fin: string }[] }[];
@@ -1247,7 +1301,7 @@ async function handleMetasReal(params: URLSearchParams) {
   const semanas = cicloDef.semanas;
   const fechaDesde = semanas[0].inicio;
   const fechaHasta = semanas[semanas.length - 1].fin;
-  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
 
   const weekCases = semanas
     .map(s => `WHEN DATE(f.fecha) BETWEEN '${s.inicio}' AND '${s.fin}' THEN ${s.num}`)
@@ -1277,7 +1331,7 @@ async function handleMetasReal(params: URLSearchParams) {
   }
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})
+    ${_ctes()}
     SELECT
       f.valor AS etapa_bq,
       (CASE ${weekCases} ELSE NULL END) AS wk,
@@ -1286,6 +1340,7 @@ async function handleMetasReal(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${where}
       AND f.valor IN (${_quoteList(todasEtapasBq)})
     GROUP BY 1, 2, 3
@@ -1342,6 +1397,8 @@ async function handleMetasKpiTendencias(params: URLSearchParams) {
   const recurrencia = getList(params, 'recurrencia');
   const fuente = getList(params, 'fuente');
   const area = getList(params, 'area');
+  const motivo = getList(params, 'motivo');
+  const campaign = params.getAll('campaign');
 
   const cycles = loadCycles() as {
     ciclo: number;
@@ -1378,7 +1435,7 @@ async function handleMetasKpiTendencias(params: URLSearchParams) {
 
   const fechaDesde = seriesFlat[0].inicio;
   const fechaHasta = seriesFlat[seriesFlat.length - 1].fin;
-  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area);
+  const where = _buildWhere(fechaDesde, fechaHasta, equipo, catCom, cat, recurrencia, fuente, area, false, campaign.length ? campaign : null, motivo);
 
   const weekCases = seriesFlat
     .map(s => `WHEN DATE(f.fecha) BETWEEN '${s.inicio}' AND '${s.fin}' THEN '${s.ciclo}-${s.week}'`)
@@ -1390,7 +1447,7 @@ async function handleMetasKpiTendencias(params: URLSearchParams) {
   }
 
   const sql = `
-    WITH comerciales AS (${_comercialesUnnest()})
+    ${_ctes()}
     SELECT
       f.valor AS etapa_bq,
       (CASE ${weekCases} ELSE NULL END) AS wkey,
@@ -1398,6 +1455,7 @@ async function handleMetasKpiTendencias(params: URLSearchParams) {
     FROM \`papyrus-data.habi_wh_bi.funnel_diarios_col\` f
     LEFT JOIN \`sellers-main-prod.hubspot.deals\` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
+    ${MOTIVO_JOIN}
     WHERE ${where}
       AND f.valor IN (${_quoteList(todasEtapasBq)})
     GROUP BY 1, 2

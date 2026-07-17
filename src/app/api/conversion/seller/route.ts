@@ -228,7 +228,7 @@ function comercialesActivosInmoUnnest(): string {
  */
 function campaignIn(field: string, campaigns: string[]): string {
   if (!campaigns.length) return 'TRUE';
-  const list = campaigns.map(c => `'${c.replace(/'/g, "\\'")}'`).join(', ');
+  const list = campaigns.map(c => `'${c.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).join(', ');
   return `${field} IN (${list})`;
 }
 
