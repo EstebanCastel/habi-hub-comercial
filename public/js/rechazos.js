@@ -60,7 +60,7 @@ function rechazos() {
 
     async loadFilters() {
       try {
-        const r = await fetch(`/rechazos/filters?fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
+        const r = await fetch(`/api/rechazos?action=filters&fecha_desde=${this.fechaDesde}&fecha_hasta=${this.fechaHasta}`);
         const j = await r.json();
         this.areaOptions = j.areas || [];
       } catch (e) { this.areaOptions = []; }
@@ -69,9 +69,9 @@ function rechazos() {
     async loadData() {
       this.loading = true;
       try {
-        const qs = new URLSearchParams({ fecha_desde: this.fechaDesde, fecha_hasta: this.fechaHasta, granularidad: this.gran });
+        const qs = new URLSearchParams({ action: "data", fecha_desde: this.fechaDesde, fecha_hasta: this.fechaHasta, granularidad: this.gran });
         (this.selectedAreas || []).forEach(a => qs.append("area", a));
-        const r = await fetch(`/rechazos/data?${qs.toString()}`);
+        const r = await fetch(`/api/rechazos?${qs.toString()}`);
         this.raw = await r.json();
         this.$nextTick(() => this.renderChart());
       } finally {
@@ -88,7 +88,7 @@ function rechazos() {
     async forceRefresh() {
       this.refreshing = true;
       try {
-        await fetch("/admin/cache/clear", { method: "POST" });
+        await fetch("/api/admin/cache/clear", { method: "POST" });
         await this.loadData();
       } finally {
         setTimeout(() => { this.refreshing = false; }, 700);

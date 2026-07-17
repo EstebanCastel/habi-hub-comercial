@@ -9,13 +9,13 @@
  * - TABLE = sellers-main-prod.bi_mx.seguimiento_funnel_mex
  * - No loadComerciales() / CSV join — equipo/prioridad/categoria_comercial are
  *   native columns on the MX funnel table.
- * - No loadCycles() in _groupExpr (mes_com/sem_com not used in MX yet, but kept
- *   for parity — same loadCycles() logic could be added if needed).
+ * - _groupExpr supports mes_com/sem_com via loadCycles() (cycles are shared CO/MX).
  * - No BUFFER_EMAILS filtering.
  * - MOTIVO_JOIN against sellers-main-prod.hubspot.deals for razon de venta.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { query, cacheClear } from '@/lib/bq';
+import { loadCycles } from '@/lib/data';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -191,6 +191,28 @@ function _groupExpr(granularidad: string, field = 'f.fecha'): [string, string] {
   }
   if (granularidad === 'semana') {
     const g = `FORMAT_DATE('%Y-%m-%d', DATE_TRUNC(DATE(${field}), WEEK(MONDAY)))`;
+    return [g, g];
+  }
+  if (granularidad === 'mes_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens = cycles.map(c => {
+      const mesShort = (c.mes as string).slice(0, 3).charAt(0).toUpperCase() + (c.mes as string).slice(1, 3);
+      const label = `C${String(c.ciclo).padStart(2, '0')} · ${mesShort} ${String(c.year).slice(2)}`;
+      return `WHEN DATE(${field}) BETWEEN '${c.inicio}' AND '${c.fin}' THEN '${label}'`;
+    });
+    const g = `CASE ${whens.join(' ')} ELSE NULL END`;
+    return [g, g];
+  }
+  if (granularidad === 'sem_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens: string[] = [];
+    for (const c of cycles) {
+      for (const s of c.semanas as Array<Record<string, unknown>>) {
+        const label = `C${String(c.ciclo).padStart(2, '0')}-S${String(s.num).padStart(2, '0')}`;
+        whens.push(`WHEN DATE(${field}) BETWEEN '${s.inicio}' AND '${s.fin}' THEN '${label}'`);
+      }
+    }
+    const g = `CASE ${whens.join(' ')} ELSE NULL END`;
     return [g, g];
   }
   // Default: mes
@@ -398,15 +420,16 @@ async function handleKpis(params: URLSearchParams) {
       anterior: ant,
       delta,
       mtd_label: mtdLabel,
+      // Metadata repeated on each row so the template can build the MTD footer
+      // from kpis[0] while consuming a plain array (parity with inmo-mx).
+      label_actual: labelActual,
+      label_anterior: labelAnterior,
+      dia_corte: hoy.getDate(),
     };
   });
 
-  return NextResponse.json({
-    kpis: kpiRows,
-    label_actual: labelActual,
-    label_anterior: labelAnterior,
-    dia_corte: hoy.getDate(),
-  });
+  // Plain array — matches inmo-mx handleKpis and the template's kpis.map(...).
+  return NextResponse.json(kpiRows);
 }
 
 async function handleShareCat(params: URLSearchParams) {

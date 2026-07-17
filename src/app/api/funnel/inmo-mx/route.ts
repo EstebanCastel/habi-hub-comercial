@@ -11,6 +11,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { query, cacheClear } from '@/lib/bq';
+import { loadCycles } from '@/lib/data';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,28 @@ function groupExpr(granularidad: string, field = 'f.fecha'): [string, string] {
   }
   if (granularidad === 'semana') {
     const g = `FORMAT_DATE('%Y-%m-%d', DATE_TRUNC(DATE(${field}), WEEK(MONDAY)))`;
+    return [g, g];
+  }
+  if (granularidad === 'mes_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens = cycles.map(c => {
+      const mesShort = (c.mes as string).slice(0, 3).charAt(0).toUpperCase() + (c.mes as string).slice(1, 3);
+      const label = `C${String(c.ciclo).padStart(2, '0')} · ${mesShort} ${String(c.year).slice(2)}`;
+      return `WHEN DATE(${field}) BETWEEN '${c.inicio}' AND '${c.fin}' THEN '${label}'`;
+    });
+    const g = `CASE ${whens.join(' ')} ELSE NULL END`;
+    return [g, g];
+  }
+  if (granularidad === 'sem_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens: string[] = [];
+    for (const c of cycles) {
+      for (const s of c.semanas as Array<Record<string, unknown>>) {
+        const label = `C${String(c.ciclo).padStart(2, '0')}-S${String(s.num).padStart(2, '0')}`;
+        whens.push(`WHEN DATE(${field}) BETWEEN '${s.inicio}' AND '${s.fin}' THEN '${label}'`);
+      }
+    }
+    const g = `CASE ${whens.join(' ')} ELSE NULL END`;
     return [g, g];
   }
   // Default: mes

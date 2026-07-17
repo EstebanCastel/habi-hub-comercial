@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { query, cacheClear } from '@/lib/bq';
+import { loadCycles } from '@/lib/data';
 
 // ── Tables ───────────────────────────────────────────────────────────────────
 
@@ -618,7 +619,26 @@ async function handleFunnelCompare(sp: URLSearchParams) {
 function groupExprSql(granularidad: string, col = 'e.fecha'): string {
   if (granularidad === 'dia')    return `FORMAT_DATE('%Y-%m-%d', DATE(${col}))`;
   if (granularidad === 'semana') return `FORMAT_DATE('%Y-%m-%d', DATE_TRUNC(DATE(${col}), WEEK(MONDAY)))`;
-  // mes_com / sem_com require cycle data not available in MX; fall through to month.
+  if (granularidad === 'mes_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens = cycles.map(c => {
+      const mesShort = (c.mes as string).slice(0, 3).charAt(0).toUpperCase() + (c.mes as string).slice(1, 3);
+      const label = `C${String(c.ciclo).padStart(2, '0')} · ${mesShort} ${String(c.year).slice(2)}`;
+      return `WHEN DATE(${col}) BETWEEN '${c.inicio}' AND '${c.fin}' THEN '${label}'`;
+    });
+    return `CASE ${whens.join(' ')} ELSE NULL END`;
+  }
+  if (granularidad === 'sem_com') {
+    const cycles = loadCycles() as Array<Record<string, unknown>>;
+    const whens: string[] = [];
+    for (const c of cycles) {
+      for (const s of c.semanas as Array<Record<string, unknown>>) {
+        const label = `C${String(c.ciclo).padStart(2, '0')}-S${String(s.num).padStart(2, '0')}`;
+        whens.push(`WHEN DATE(${col}) BETWEEN '${s.inicio}' AND '${s.fin}' THEN '${label}'`);
+      }
+    }
+    return `CASE ${whens.join(' ')} ELSE NULL END`;
+  }
   return `FORMAT_DATE('%Y-%m', DATE(${col}))`;
 }
 
