@@ -154,6 +154,48 @@ def _map_prioridad(vals: list[str]) -> list[str]:
     return ["" if v == SIN_PRIORIDAD_LABEL else v for v in vals]
 
 
+def _dia_ciclo_expr(field: str) -> str:
+    """Expresión SQL: día dentro del ciclo comercial (1-based, 1–28) para `field`.
+
+    Mapea cada fecha al ciclo que la contiene (calendario en comercial_cycles.json)
+    y devuelve DATE_DIFF(fecha, inicio_ciclo)+1. NULL si cae fuera de todo ciclo.
+    """
+    cycles = bq.load_cycles()
+    whens = [
+        f"WHEN DATE({field}) BETWEEN '{c['inicio']}' AND '{c['fin']}' "
+        f"THEN DATE_DIFF(DATE({field}), DATE('{c['inicio']}'), DAY) + 1"
+        for c in cycles
+    ]
+    return f"CASE {' '.join(whens)} ELSE NULL END"
+
+
+def _dia_mes_conds(field: str, dia_min: int | None, dia_max: int | None,
+                   granularidad: str = "mes") -> list[str]:
+    """Condiciones del filtro global "día" (slider que aplica a TODOS los períodos).
+
+    En granularidades calendario (mes/semana/dia) filtra por el día del mes de `field`
+    (1–31). En granularidades comerciales (mes_com/sem_com) filtra por el día del ciclo
+    (1–28), para comparar ciclos en igualdad de "ciclo-a-la-fecha". Sólo agrega condición
+    cuando el rango se estrecha (min>1 o max<tope), para no ensuciar el SQL en su default.
+    """
+    ciclo = granularidad in ("mes_com", "sem_com")
+    expr = _dia_ciclo_expr(field) if ciclo else f"EXTRACT(DAY FROM DATE({field}))"
+    tope = 28 if ciclo else 31
+    conds: list[str] = []
+    if dia_min is not None and int(dia_min) > 1:
+        conds.append(f"{expr} >= {int(dia_min)}")
+    if dia_max is not None and int(dia_max) < tope:
+        conds.append(f"{expr} <= {int(dia_max)}")
+    return conds
+
+
+def _append_dia_mes(where: str, field: str, dia_min: int | None, dia_max: int | None,
+                    granularidad: str = "mes") -> str:
+    """Agrega las condiciones de día (del mes o del ciclo) a un WHERE ya construido."""
+    conds = _dia_mes_conds(field, dia_min, dia_max, granularidad)
+    return where + ("\n  AND " + "\n  AND ".join(conds) if conds else "")
+
+
 def _build_where(
     fecha_desde: str,
     fecha_hasta: str,
@@ -350,11 +392,14 @@ def volumen(
     area: Annotated[list[str] | None, Query()] = None,
     motivo: Annotated[list[str] | None, Query()] = None,
     campaign: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     """Devuelve {labels:[...], datasets:[{label, color, data:[...]}]}."""
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
 
     group_expr, order_expr = _group_expr(granularidad)
 
@@ -412,14 +457,10 @@ def kpis(
     area: Annotated[list[str] | None, Query()] = None,
     motivo: Annotated[list[str] | None, Query()] = None,
     campaign: Annotated[list[str] | None, Query()] = None,
+    granularidad: Annotated[str, Query()] = "mes",
 ):
-    """MTD del mes actual (días 1..hoy) vs mismos días mes anterior."""
-    from datetime import timedelta
-    hoy = date.today()
-    inicio_actual = hoy.replace(day=1)
-    inicio_anterior = (inicio_actual - timedelta(days=1)).replace(day=1)
-    # mismo día del mes anterior
-    fin_anterior = inicio_anterior + (hoy - inicio_actual)
+    """Comparación a-la-fecha: MTD del mes (calendario) o CTD del ciclo (mes_com/sem_com)."""
+    w = bq.kpi_windows(granularidad)
 
     def make_where(start: str, end: str) -> str:
         return _build_where(start, end, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
@@ -434,7 +475,7 @@ def kpis(
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
     {MOTIVO_JOIN}
-    WHERE {make_where(inicio_actual.isoformat(), hoy.isoformat())}
+    WHERE {make_where(w['inicio_actual'], w['fin_actual'])}
     GROUP BY 1, 2
     UNION ALL
     SELECT
@@ -445,7 +486,7 @@ def kpis(
     LEFT JOIN `sellers-main-prod.hubspot.deals` d ON d.nid = f.nid
     LEFT JOIN comerciales c ON LOWER(c.email) = LOWER(f.hubspot_owner_id)
     {MOTIVO_JOIN}
-    WHERE {make_where(inicio_anterior.isoformat(), fin_anterior.isoformat())}
+    WHERE {make_where(w['inicio_anterior'], w['fin_anterior'])}
     GROUP BY 1, 2
     """
     rows = bq.query(sql)
@@ -471,16 +512,13 @@ def kpis(
         delta = ((act - ant) / ant * 100) if ant > 0 else None
         kpi_rows.append({"label": k["label"], "actual": act, "anterior": ant, "delta": delta})
 
-    NOMBRES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
-    label_actual   = f"{NOMBRES[inicio_actual.month-1]} {inicio_actual.year}"
-    label_anterior = f"{NOMBRES[inicio_anterior.month-1]} {inicio_anterior.year}"
-
     return templates.TemplateResponse("funnel_mm/partials/kpis.html", {
         "request": request,
         "kpis": kpi_rows,
-        "label_actual": label_actual,
-        "label_anterior": label_anterior,
-        "dia_corte": hoy.day,
+        "label_actual": w["label_actual"],
+        "label_anterior": w["label_anterior"],
+        "dia_corte": w["dia_corte"],
+        "modo": w["modo"],
     })
 
 
@@ -508,6 +546,8 @@ def share_cat(
     prioridad_mm: Annotated[list[str] | None, Query()] = None,
     prioridad_inmo: Annotated[list[str] | None, Query()] = None,
     campaign: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     """Distribución por categoría (A/B/C) en la etapa de Primer asignación.
 
@@ -516,6 +556,7 @@ def share_cat(
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
     extra = []
     if prioridad_mm:
         extra.append(f"COALESCE(d.prioridad_gestion_market_maker, '') IN ({_quote_list(_map_prioridad(prioridad_mm))})")
@@ -604,6 +645,8 @@ def share_motivo(
     area: Annotated[list[str] | None, Query()] = None,
     motivo: Annotated[list[str] | None, Query()] = None,
     campaign: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     """Distribución por razón de venta (categorizada) en la Primer asignación.
 
@@ -613,6 +656,7 @@ def share_motivo(
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
     group_expr, _ = _group_expr(granularidad)
 
     sql = f"""
@@ -691,6 +735,8 @@ def conv_time(
     motivo: Annotated[list[str] | None, Query()] = None,
     prioridad_mm: Annotated[list[str] | None, Query()] = None,
     campaign: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     """CVR por período: nids(num) / nids(den).
 
@@ -717,6 +763,7 @@ def conv_time(
     funnel_etapas = sorted({x for x in (num + den) if x not in ("Lead", "Lead (filas)")})
 
     where = _build_where(fecha_desde, fecha_hasta, equipo, cat_com, cat, recurrencia, fuente, area, motivo, campaign)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
     if prioridad_mm:
         where += f"\n  AND COALESCE(d.prioridad_gestion_market_maker, '') IN ({_quote_list(_map_prioridad(prioridad_mm))})"
     group_f, _ = _group_expr(granularidad)
@@ -742,6 +789,7 @@ def conv_time(
             f"DATE(ig.fecha_creacion) >= '{fecha_desde}'",
             f"DATE(ig.fecha_creacion) <= '{fecha_hasta}'",
         ]
+        lead_conds += _dia_mes_conds("ig.fecha_creacion", dia_min, dia_max, granularidad)
         if fuente:
             lead_conds.append(f"COALESCE(ig.fuente, '') IN ({_quote_list(fuente)})")
         if area:

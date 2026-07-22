@@ -116,6 +116,10 @@ function filterParams() {
   ["equipo","cat_com","cat","recurrencia","fuente","area","motivo","campaign"].forEach(k => {
     if (f[k] && f[k].length) out[k] = f[k];
   });
+  // Slider día del mes/ciclo — solo se manda cuando estrecha el default [1, tope]
+  const diaTop = (typeof root.diaTop === "function") ? root.diaTop() : 31;
+  if (root.diaMin > 1)      out.dia_min = root.diaMin;
+  if (root.diaMax < diaTop) out.dia_max = root.diaMax;
   return out;
 }
 
@@ -134,6 +138,9 @@ function funnelMM() {
     fechaDesde: document.body.dataset.fechaDesde || "2026-01-01",
     fechaHasta: document.body.dataset.fechaHasta || new Date().toISOString().slice(0,10),
     granularidad: "mes",
+    // Slider "día del mes" (1–31) — aplica el mismo rango de días a todos los meses
+    diaMin: 1,
+    diaMax: 31,
     filtersOptions: { equipos:[], cats_com:[], cats:[], recurrencias:[], fuentes:[], areas:[], motivos:[], campaigns:[] },
     etapasList: [],
     loading: { volumen: false, kpis: false, shareCat: false, shareMotivo: false, convTime: false, negocios: false, metas: false, cosechas: false, precios: false },
@@ -1167,6 +1174,33 @@ function funnelMM() {
       table.innerHTML = html;
     },
 
+    // Tope del slider: 28 en vistas comerciales (día del ciclo), 31 en calendario
+    isDiaCiclo() {
+      return this.granularidad === "mes_com" || this.granularidad === "sem_com";
+    },
+    diaTop() {
+      return this.isDiaCiclo() ? 28 : 31;
+    },
+    // Cambia granularidad y ajusta el slider al nuevo tope (día del mes ↔ día del ciclo)
+    setGranularidad(g) {
+      const oldTop = this.diaTop();
+      this.granularidad = g;
+      const newTop = this.diaTop();
+      // Si el max estaba en el tope (= "Todos"), muévelo al nuevo tope
+      if (this.diaMax >= oldTop) this.diaMax = newTop;
+      else if (this.diaMax > newTop) this.diaMax = newTop;
+      if (this.diaMin > newTop) this.diaMin = newTop;
+      this.refresh();
+    },
+
+    // Posición del track resaltado del slider día del mes/ciclo (1–tope → 0–100%)
+    diaFillStyle() {
+      const span = this.diaTop() - 1;
+      const l = (this.diaMin - 1) / span * 100;
+      const r = (this.diaMax - 1) / span * 100;
+      return `left:${l}%;width:${Math.max(0, r - l)}%`;
+    },
+
     resetFilters() {
       ["equipo","cat_com","cat","recurrencia","fuente","area","motivo","campaign",
        "convTimeFuente","convTimeEquipo","convTimeArea","convTimeRecurrencia","convTimePrioridadMM","convTimeCampaign"].forEach(k => {
@@ -1179,6 +1213,8 @@ function funnelMM() {
           if (d.key !== "convNum" && d.key !== "convDen") d.values = [];
         }
       });
+      this.diaMin = 1;
+      this.diaMax = this.diaTop();
       this.refresh();
     },
 

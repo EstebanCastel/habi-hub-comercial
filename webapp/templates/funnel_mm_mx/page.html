@@ -106,11 +106,29 @@
           class="px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500">
       </div>
 
+      {# Slider "día del mes" — aplica el mismo rango de días a TODOS los meses (Volumen/Share/CVR) #}
+      <div class="flex flex-col gap-1 min-w-0 col-span-2">
+        <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400 flex items-center justify-between gap-2">
+          <span :title="isDiaCiclo() ? 'Filtra por día del ciclo comercial (1–28) en TODOS los ciclos del rango' : 'Filtra por día del mes en TODOS los meses del rango (Volumen, Share y CVR)'"
+                x-text="isDiaCiclo() ? 'Día del ciclo' : 'Día del mes'"></span>
+          <span class="normal-case tracking-normal text-slate-400 dark:text-slate-500 tabular-nums"
+                x-text="(diaMin===1 && diaMax===diaTop()) ? 'Todos' : ('Día ' + diaMin + '–' + diaMax)"></span>
+        </label>
+        <div class="rng-dual px-1.5">
+          <div class="rng-track"></div>
+          <div class="rng-fill" :style="diaFillStyle()"></div>
+          <input type="range" min="1" :max="diaTop()" step="1" x-model.number="diaMin"
+                 @input="if (diaMin > diaMax) diaMin = diaMax" @change="refresh()" aria-label="Día desde">
+          <input type="range" min="1" :max="diaTop()" step="1" x-model.number="diaMax"
+                 @input="if (diaMax < diaMin) diaMax = diaMin" @change="refresh()" aria-label="Día hasta">
+        </div>
+      </div>
+
       <div class="flex flex-col gap-1 min-w-0 col-span-2 sm:col-span-3 lg:col-span-3">
         <label class="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Granularidad</label>
         <div class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
           <template x-for="g in [['mes','Mes'],['semana','Sem'],['dia','Día'],['mes_com','Mes com.'],['sem_com','Sem. com.']]" :key="g[0]">
-            <button @click="granularidad=g[0]; refresh()"
+            <button @click="setGranularidad(g[0])"
               :class="granularidad===g[0]
                 ? 'bg-brand-600 text-white'
                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
@@ -395,6 +413,9 @@ function funnelMmMx() {
     fechaDesde: "{{ fecha_desde }}",
     fechaHasta: "{{ fecha_hasta }}",
     granularidad: "mes",
+    // Slider "día del mes" (1–31) — aplica el mismo rango de días a todos los meses
+    diaMin: 1,
+    diaMax: 31,
     filtersOptions: {},
     // share por categoría
     shareData: null,
@@ -448,11 +469,41 @@ function funnelMmMx() {
       p.set("fecha_desde", this.fechaDesde);
       p.set("fecha_hasta", this.fechaHasta);
       for (const d of this.dims) for (const v of (s[d] || [])) p.append(d, v);
+      // Slider día del mes/ciclo — solo se manda cuando estrecha el default [1, tope]
+      if (this.diaMin > 1)            p.set("dia_min", this.diaMin);
+      if (this.diaMax < this.diaTop()) p.set("dia_max", this.diaMax);
       return p;
+    },
+
+    // Tope del slider: 28 en vistas comerciales (día del ciclo), 31 en calendario
+    isDiaCiclo() {
+      return this.granularidad === "mes_com" || this.granularidad === "sem_com";
+    },
+    diaTop() {
+      return this.isDiaCiclo() ? 28 : 31;
+    },
+    // Cambia granularidad y ajusta el slider al nuevo tope (día del mes ↔ día del ciclo)
+    setGranularidad(g) {
+      const oldTop = this.diaTop();
+      this.granularidad = g;
+      const newTop = this.diaTop();
+      if (this.diaMax >= oldTop) this.diaMax = newTop;
+      else if (this.diaMax > newTop) this.diaMax = newTop;
+      if (this.diaMin > newTop) this.diaMin = newTop;
+      this.refresh();
+    },
+
+    // Posición del track resaltado del slider día del mes/ciclo (1–tope → 0–100%)
+    diaFillStyle() {
+      const span = this.diaTop() - 1;
+      const l = (this.diaMin - 1) / span * 100;
+      const r = (this.diaMax - 1) / span * 100;
+      return `left:${l}%;width:${Math.max(0, r - l)}%`;
     },
     kpiParams() {
       const s = Alpine.store("mxf");
       const p = new URLSearchParams();
+      p.set("granularidad", this.granularidad);
       for (const d of this.dims) for (const v of (s[d] || [])) p.append(d, v);
       return p;
     },
@@ -858,6 +909,8 @@ function funnelMmMx() {
         const d = el._x_dataStack && el._x_dataStack[0];
         if (d && this.dims.includes(d.key)) d.values = [];
       });
+      this.diaMin = 1;
+      this.diaMax = this.diaTop();
       this.reload();
     },
   };

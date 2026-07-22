@@ -83,6 +83,48 @@ def _build_where(
     return "\n  AND ".join(conds)
 
 
+def _dia_ciclo_expr(field: str) -> str:
+    """Expresión SQL: día dentro del ciclo comercial (1-based, 1–28) para `field`.
+
+    Mapea cada fecha al ciclo que la contiene (calendario en comercial_cycles.json)
+    y devuelve DATE_DIFF(fecha, inicio_ciclo)+1. NULL si cae fuera de todo ciclo.
+    """
+    cycles = bq.load_cycles()
+    whens = [
+        f"WHEN DATE({field}) BETWEEN '{c['inicio']}' AND '{c['fin']}' "
+        f"THEN DATE_DIFF(DATE({field}), DATE('{c['inicio']}'), DAY) + 1"
+        for c in cycles
+    ]
+    return f"CASE {' '.join(whens)} ELSE NULL END"
+
+
+def _dia_mes_conds(field: str, dia_min: int | None, dia_max: int | None,
+                   granularidad: str = "mes") -> list[str]:
+    """Condiciones del filtro global "día" (slider que aplica a TODOS los períodos).
+
+    En granularidades calendario (mes/semana/dia) filtra por el día del mes (1–31).
+    En granularidades comerciales (mes_com/sem_com) filtra por el día del ciclo (1–28),
+    para comparar ciclos en igualdad de "ciclo-a-la-fecha". Sólo agrega condición cuando
+    el rango se estrecha (min>1 o max<tope), para no ensuciar el SQL en su default.
+    """
+    ciclo = granularidad in ("mes_com", "sem_com")
+    expr = _dia_ciclo_expr(field) if ciclo else f"EXTRACT(DAY FROM DATE({field}))"
+    tope = 28 if ciclo else 31
+    conds: list[str] = []
+    if dia_min is not None and int(dia_min) > 1:
+        conds.append(f"{expr} >= {int(dia_min)}")
+    if dia_max is not None and int(dia_max) < tope:
+        conds.append(f"{expr} <= {int(dia_max)}")
+    return conds
+
+
+def _append_dia_mes(where: str, field: str, dia_min: int | None, dia_max: int | None,
+                    granularidad: str = "mes") -> str:
+    """Agrega las condiciones de día (del mes o del ciclo) a un WHERE ya construido."""
+    conds = _dia_mes_conds(field, dia_min, dia_max, granularidad)
+    return where + ("\n  AND " + "\n  AND ".join(conds) if conds else "")
+
+
 def _group_expr(granularidad: str, field: str = "f.fecha") -> tuple[str, str]:
     """SQL para agrupar por granularidad (CO y MX comparten ciclos comerciales)."""
     if granularidad == "dia":
@@ -177,10 +219,13 @@ def volumen(
     equipo: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
     where = _build_where(fecha_desde, fecha_hasta, equipo, fuente, area)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
     group_expr, order_expr = _group_expr(granularidad)
     stage_keys = [e["key"] for e in ETAPAS_INMO]
 
@@ -218,11 +263,9 @@ def kpis(
     equipo: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    granularidad: Annotated[str, Query()] = "mes",
 ):
-    hoy = date.today()
-    inicio_actual = hoy.replace(day=1)
-    inicio_anterior = (inicio_actual - timedelta(days=1)).replace(day=1)
-    fin_anterior = inicio_anterior + (hoy - inicio_actual)
+    w = bq.kpi_windows(granularidad)
 
     def make_where(s, e):
         return _build_where(s, e, equipo, fuente, area)
@@ -231,12 +274,12 @@ def kpis(
     sql = f"""
     SELECT 'actual' AS periodo, f.valor AS etapa, COUNT(DISTINCT f.nid) AS nids
     FROM `{TABLE}` f
-    WHERE {make_where(inicio_actual.isoformat(), hoy.isoformat())} AND f.valor IN ({_quote_list(stage_keys)})
+    WHERE {make_where(w['inicio_actual'], w['fin_actual'])} AND f.valor IN ({_quote_list(stage_keys)})
     GROUP BY 1, 2
     UNION ALL
     SELECT 'anterior' AS periodo, f.valor AS etapa, COUNT(DISTINCT f.nid) AS nids
     FROM `{TABLE}` f
-    WHERE {make_where(inicio_anterior.isoformat(), fin_anterior.isoformat())} AND f.valor IN ({_quote_list(stage_keys)})
+    WHERE {make_where(w['inicio_anterior'], w['fin_anterior'])} AND f.valor IN ({_quote_list(stage_keys)})
     GROUP BY 1, 2
     """
     rows = bq.query(sql)
@@ -260,13 +303,13 @@ def kpis(
         delta = ((act - ant) / ant * 100) if ant > 0 else None
         kpi_rows.append({"label": k["label"], "actual": act, "anterior": ant, "delta": delta})
 
-    NOMBRES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
     return templates.TemplateResponse("funnel_mm_mx/partials/kpis.html", {
         "request": request,
         "kpis": kpi_rows,
-        "label_actual": f"{NOMBRES[inicio_actual.month-1]} {inicio_actual.year}",
-        "label_anterior": f"{NOMBRES[inicio_anterior.month-1]} {inicio_anterior.year}",
-        "dia_corte": hoy.day,
+        "label_actual": w["label_actual"],
+        "label_anterior": w["label_anterior"],
+        "dia_corte": w["dia_corte"],
+        "modo": w["modo"],
     })
 
 
@@ -281,6 +324,8 @@ def conv_time(
     equipo: Annotated[list[str] | None, Query()] = None,
     fuente: Annotated[list[str] | None, Query()] = None,
     area: Annotated[list[str] | None, Query()] = None,
+    dia_min: Annotated[int | None, Query()] = None,
+    dia_max: Annotated[int | None, Query()] = None,
 ):
     if not fecha_hasta:
         fecha_hasta = date.today().isoformat()
@@ -289,6 +334,7 @@ def conv_time(
     if not den:
         den = [ETAPA_ASIGNACION]
     where = _build_where(fecha_desde, fecha_hasta, equipo, fuente, area)
+    where = _append_dia_mes(where, "f.fecha", dia_min, dia_max, granularidad)
     group_f, _ = _group_expr(granularidad)
 
     sql = f"""

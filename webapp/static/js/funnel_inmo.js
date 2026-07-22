@@ -85,6 +85,10 @@ function filterParamsInmo() {
   ["equipo","cat_com","prioridad","area"].forEach(k => {
     if (f[k] && f[k].length) out[k] = f[k];
   });
+  // Slider día del mes/ciclo — solo se manda cuando estrecha el default [1, tope]
+  const diaTop = (typeof root.diaTop === "function") ? root.diaTop() : 31;
+  if (root.diaMin > 1)      out.dia_min = root.diaMin;
+  if (root.diaMax < diaTop) out.dia_max = root.diaMax;
   return out;
 }
 window.filterParams = filterParamsInmo;
@@ -104,6 +108,9 @@ function funnelInmo() {
     fechaHasta: document.body.dataset.fechaHasta || new Date().toISOString().slice(0,10),
     granularidad: "mes",
     excludeIncidente: true,
+    // Slider "día del mes" (1–31) — aplica el mismo rango de días a todos los meses
+    diaMin: 1,
+    diaMax: 31,
     filtersOptions: { equipos:[], cats_com:[], prioridades:[], areas:[] },
     etapasList: [],
     loading: { volumen: false, kpis: false, shareCat: false, convTime: false, negocios: false, metas: false },
@@ -667,6 +674,32 @@ function funnelInmo() {
       }); } catch (e) { console.error("renderConvTime failed", e); }
     },
 
+    // Tope del slider: 28 en vistas comerciales (día del ciclo), 31 en calendario
+    isDiaCiclo() {
+      return this.granularidad === "mes_com" || this.granularidad === "sem_com";
+    },
+    diaTop() {
+      return this.isDiaCiclo() ? 28 : 31;
+    },
+    // Cambia granularidad y ajusta el slider al nuevo tope (día del mes ↔ día del ciclo)
+    setGranularidad(g) {
+      const oldTop = this.diaTop();
+      this.granularidad = g;
+      const newTop = this.diaTop();
+      if (this.diaMax >= oldTop) this.diaMax = newTop;
+      else if (this.diaMax > newTop) this.diaMax = newTop;
+      if (this.diaMin > newTop) this.diaMin = newTop;
+      this.refresh();
+    },
+
+    // Posición del track resaltado del slider día del mes/ciclo (1–tope → 0–100%)
+    diaFillStyle() {
+      const span = this.diaTop() - 1;
+      const l = (this.diaMin - 1) / span * 100;
+      const r = (this.diaMax - 1) / span * 100;
+      return `left:${l}%;width:${Math.max(0, r - l)}%`;
+    },
+
     resetFilters() {
       ["equipo","cat_com","prioridad","area"].forEach(k => {
         Alpine.store("inmoFilters")[k] = [];
@@ -677,6 +710,8 @@ function funnelInmo() {
           if (d.key !== "convNum" && d.key !== "convDen") d.values = [];
         }
       });
+      this.diaMin = 1;
+      this.diaMax = this.diaTop();
       this.refresh();
     },
   };

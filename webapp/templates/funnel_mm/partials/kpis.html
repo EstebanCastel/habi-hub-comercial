@@ -17,5 +17,9 @@
   {% endfor %}
 </div>
 <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-2">
+  {% if modo == 'ciclo' %}
+  Ciclo-a-la-fecha: {{ label_actual }} días 1–{{ dia_corte }} vs {{ label_anterior }} mismos días del ciclo
+  {% else %}
   MTD: {{ label_actual }} días 1–{{ dia_corte }} vs {{ label_anterior }} mismos días
+  {% endif %}
 </div>
