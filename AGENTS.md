@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-Guía para Claude Code cuando trabaja en este repo (`webapp-comercial`).
+Guía para Codex cuando trabaja en este repo (`webapp-comercial`).
 
 Este proyecto contiene **solo la webapp** de métricas comerciales de Habi CO. Es una extracción del repo `Comercial`: se dejó fuera todo lo que no necesita la webapp para correr (reportes legacy, generadores de metas por ciclo, presentaciones, análisis ad-hoc, plantillas de docs).
 
@@ -67,13 +67,7 @@ BigQuery (papyrus-data + sellers-main-prod)
 - **Caché:** `cachetools.TTLCache` 500 queries × 5 min (en memoria, por proceso)
 - **Auth a BQ:** ADC del usuario (`gcloud auth application-default login`). No service account.
 - **Filtros live:** Alpine.js + HTMX. Al cambiar un filtro, se hace `fetch` al endpoint relevante y se re-renderiza el gráfico/tabla.
-- **Filtro "Día del mes / Día del ciclo" (slider dual):** filtro global en Funnel MM e Inmo (CO y MX) que aplica el mismo rango de días a **todos los períodos** del rango. **El slider es sensible a la granularidad:**
-  - Granularidades **calendario** (`mes`/`semana`/`dia`): "Día del mes", rango **1–31**, `EXTRACT(DAY FROM DATE(fecha)) BETWEEN dia_min AND dia_max` (comparar meses en igualdad de MTD).
-  - Granularidades **comerciales** (`mes_com`/`sem_com`): "Día del ciclo", rango **1–28**, filtra por el día dentro del ciclo comercial = `DATE_DIFF(fecha, inicio_ciclo)+1` vía CASE por ciclo (comparar ciclos en igualdad de ciclo-a-la-fecha). Los ciclos que no cubren una fecha (ej. ene-2026, antes del Ciclo 1) ya se descartan solos en estas vistas.
-  - Default = tope completo (`[1,31]` o `[1,28]`) = sin filtro (no toca el SQL ni se manda como query param). Al alternar granularidad, `setGranularidad()` reajusta el slider al nuevo tope.
-  - Backend: helpers `_dia_ciclo_expr`/`_dia_mes_conds`/`_append_dia_mes` (con param `granularidad`) en cada router (`f.fecha` en MM/MX, `b.fecha` en Inmo CO). Frontend: `diaMin`/`diaMax` + `diaTop()`/`isDiaCiclo()`/`diaFillStyle()`. CSS `.rng-dual` en `static/css/app.css`.
-  - Aplica a las **series por período**: Volumen, Share (cat/motivo) y CVR en el tiempo. **NO** aplica a Cosechas/Funnel-compare (cohorte) ni Metas (ciclo).
-- **KPIs a-la-fecha (`/kpis`):** las 6 KPI cards comparan período actual vs anterior **según la granularidad seleccionada** (helper único `bq.kpi_windows(granularidad)`): en calendario = **MTD** (mes actual días 1..hoy vs mismos días mes anterior); en `mes_com`/`sem_com` = **CTD ciclo-a-la-fecha** (ciclo en curso desde su inicio..hoy vs los mismos días transcurridos del ciclo anterior, labels tipo `C06 · Jul 26`). El slider "Día del ciclo/mes" **no** toca los KPIs. El frontend manda `granularidad` a `/kpis` (CO vía `filterParams()`+HTMX `refresh-kpis`; MX vía `kpiParams()`+`loadKpis()`).
+- **Filtro "Día del mes" (slider dual 1–31):** filtro global en Funnel MM e Inmo (CO y MX) que aplica el mismo rango de días a **todos los meses** del rango (útil para comparar meses en igualdad de MTD). Se traduce a `EXTRACT(DAY FROM DATE(fecha)) BETWEEN dia_min AND dia_max`. Default `[1,31]` = sin filtro (no toca el SQL ni se manda como query param). Aplica a las **series por período**: Volumen, Share (cat/motivo) y CVR en el tiempo. **NO** aplica a KPIs (ya son MTD), Cosechas/Funnel-compare (cohorte) ni Metas (ciclo). Backend: helpers `_dia_mes_conds`/`_append_dia_mes` en cada router (`f.fecha` en MM/MX, `b.fecha` en Inmo CO). Frontend: `diaMin`/`diaMax` + `diaFillStyle()`, se suman a los params sólo cuando estrechan el default. CSS `.rng-dual` en `static/css/app.css`.
 
 ### Endpoints principales por router
 
@@ -258,47 +252,6 @@ Cada fila de `/data` trae breakdown por **categoría del lead**: `asig_cat`/`num
 ## Ciclos comerciales
 
 Definidos en `reports/comercial_cycles.json`. Para conversion seller (`CYCLE_PERIODS` en `conversion_seller.py`): cada ciclo tiene período de asignación (~1 mes) y de cierre (~1 mes, con offset).
-
-## México (MX)
-
-### Regla: cambios en ambos países
-
-Cuando se pida un cambio en una vista de funnel (MM u otras), **aplicarlo a CO y MX** siempre que tenga sentido, sin que se pida explícitamente. Adaptar a las diferencias de cada país (tablas, strings de etapa, columnas) — no copiar literal. Si un cambio solo aplica a un país (fuente que el otro no tiene), hacerlo donde corresponda y **avisar** por qué no se espejó. Verificar ambos contra BQ antes de cerrar.
-
-- Funnel MM CO = `routers/funnel_mm.py` + `templates/funnel_mm/page.html` + `static/js/funnel_mm.js` (ruta `/funnel/mm`).
-- Funnel MM MX = `routers/funnel_mm_mx.py` + `templates/funnel_mm_mx/page.html` (JS inline en la plantilla; ruta `/funnel/mm-mx`).
-- Funnel Inmo MX = `routers/funnel_inmo_mx.py` + `templates/funnel_inmo_mx/page.html` (JS inline, store `imx`; ruta `/funnel/inmo-mx`).
-- El nav usa un switcher de país (`base.html` → `countryNav()`, objeto `sections`); al crear una vista MX nueva, registrar su ruta en `MX:` de la sección correspondiente.
-
-### Tablas BQ México (equivalencias CO → MX)
-
-Las tablas MX viven en `sellers-main-prod` (datasets `bi_mx`, `InmoMX`, `*_mx`). **NO es espejo 1:1 de CO** — difieren queries, no solo nombres. Arquitectura: mismo repo, routers/queries por país (CO intacto), compartiendo `main.py`/`bq.py`/`base.html`.
-
-| CO | MX |
-|---|---|
-| `bi_co.seguimiento_inmobiliaria_col` (VIEW) | `bi_mx.seguimiento_inmobiliaria_mex` (VIEW, **sin acceso**: depende de `brokers-main-prod:mx_habi_brokers_listing.property_card` que ADC no lee) → usar `bi_mx.seguimiento_inmobiliaria_mex_copia` (TABLE, sí accesible) |
-| `bi_co.seguimiento_asignacion_ibuyer_co` | `bi_mx.seguimiento_asignacion_ibuyer` |
-| `bi_co.datos_funnel_equipos_col` | `bi_mx.datos_funnel_equipos_mx` |
-| `bi_co.metas_comerciales_co` (EXTERNAL) | `bi_mx.metas_equipo` / `metas_semanal_equipo_mex` / `input_metas_equipo_mex` (EXTERNAL) |
-| `bi_co.input_exclusion_nids_asignacion_mm_col` | `bi_mx.input_detalle_de_nids_excluir_inmo_mx` |
-| `bi_co.ciclos_comerciales` (EXTERNAL) | `bi_mx.ciclos_comerciales` (EXTERNAL) |
-| `tablero_asignacion_inmo_col` | **NO existe equivalente MX** |
-
-### Funnel Inmo MX — quirks de `seguimiento_inmobiliaria_mex_copia`
-
-- ⚠️ **FAN-OUT ROTO:** la tabla duplica filas masivamente (visto: 18.036 filas para 1 nid en 1 solo día). `COUNT(*)` es basura → contar siempre `COUNT(DISTINCT nid)`. (Difiere de CO, donde el Funnel cuenta EVENTOS/filas.) Para cosechas/entrada a etapa usar `MIN(fecha)` por nid; para **volumen** contar DISTINCT nid por mes del evento (así cuadra con el reporte oficial; NO usar MIN-first-date para volumen).
-- La etapa está en la columna `valor` (NO existe columna `etapa` como en CO). Tiene `pais`, `hubspot_owner_id_historico`, `equipo_sellers`, `semana_comercial`. Columnas de filtro: `equipo_sellers`, `area_metropolitana`, `fuente` (NO hay categoría/prioridad ni razón de venta → sin share-cat ni filtro motivo). Datos desde 2025-01.
-- ⚠️⚠️ **El funnel oficial MX es distinto al de CO.** Fuente de verdad: dashboard "Seguimiento Inmobiliaria". Los nombres de display NO coinciden con los `valor`; mapeo VERIFICADO por conteos mensuales contra el reporte (cuadra exacto ene–jun 2026):
-  - Asignados = `Asignados` · Contactados = `contactado` · Oferta aceptada = `oferta_aceptada_gabi` · Documentos solicitados = `En legal` · Contrato en elaboración = `Firma` · Captaciones/Firmas = `captaciones_3_checks` (la meta headline Inmo MX).
-  - **NO son del funnel oficial:** `ofertado`, `Enviado a comite inmo`, `Aprobado por comite inmo`, `Publicaciones` (espejar las etapas de comité de CO fue un intento INCORRECTO).
-- Captaciones/mes de referencia (jun-2026): ~80–107/mes recientes.
-
-### Funnel MM MX (`funnel_mm_mx.py`)
-
-- Single table con columnas propias del funnel (NO necesita CSV comerciales ni join a deals): `equipo`, `prioridad_gestion_market_maker`, `categoria_comercial`, `fuente`, `area_metropolitana`, `flag_recurrecia_gestion`.
-- Etapas MM (columna `valor`, strings **limpios, sin los typos de CO**): `Primer asignacion`, `Cita Agendada`, `Visita Efectuada`, `Pre-comite validado`, `rechazo Comité`, `Primer inmueble aprobado`, `Aprobado General`, `Rechazo Oferta`, `Acepto Oferta - Pendiente firma`, `Cierre - Comprado`. Excluir las variantes `(hubspot)` duplicadas.
-- MX **no tiene etapas Lead upstream** (no hay `tabla_inmuebles_general` MX).
-- Razón de venta MM MX = `sellers-main-prod.hubspot.deals.razon_de_venta_usuario_gabi_mx` (join por nid). Categórico cerrado: `Cambio de Casa`, `Liquidez`, `Otros` (a diferencia de CO = texto libre con keywords). ~70% de asignaciones = "Sin dato" (campo vacío).
 
 ## Deploy / hosting
 
